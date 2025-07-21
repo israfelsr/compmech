@@ -213,11 +213,10 @@ def main(args):
     # --- Attribute Probe Workflow ---
     if args.probe_type == 'attribute':
         logging.info("--- Starting Attribute Probe Workflow ---")
-        
         # 1. Load data
         dataset = ConceptAttributesDataset(
-            concept_file='concept_attributes.json',
-            attribute_file='attributes_taxonomy.json',
+            concept_file='mcrae-x-things.json',
+            attribute_file='mcrae-x-things-taxonomy.json',
             image_dir='images'
         )
         # Create train/dev splits (e.g., 80/20)
@@ -319,7 +318,7 @@ def setup_dummy_data():
 
 if __name__ == '__main__':
     # Create dummy data if it doesn't exist
-    setup_dummy_data()
+    #setup_dummy_data()
 
     parser = argparse.ArgumentParser(description="Train probes to evaluate representations.")
     parser.add_argument('--probe_type', type=str, required=True, choices=['attribute', 'taxonomy'],
