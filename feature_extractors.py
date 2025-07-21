@@ -44,7 +44,7 @@ class DINOv2FeatureExtractor(BaseFeatureExtractor):
         self.batch_size = batch_size
         
         # Load model and processor
-        self.processor = AutoImageProcessor.from_pretrained(model_name)
+        self.processor = AutoImageProcessor.from_pretrained(model_name, use_fast=True)
         self.model = AutoModel.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval()

@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def run_baseline_replication(concept_file='mcrae-x-things.json', 
                            attribute_file='mcrae-x-things-taxonomy.json',
                            image_dir='images',
-                           model_name='facebook/dinov2-base'):
+                           model_name='/home/bzq999/data/compmech/models/dinov2-base/'):
     """
     Run the baseline replication using the modular experiment runner.
     
