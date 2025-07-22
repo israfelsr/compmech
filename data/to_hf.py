@@ -39,7 +39,6 @@ def scan_images_in_folders(image_dir: str) -> Dict[str, List[str]]:
             
             if image_paths:
                 object_to_images[object_name] = image_paths
-                logging.info(f"Found {len(image_paths)} images for object '{object_name}'")
             else:
                 logging.warning(f"No images found for object '{object_name}'")
     
@@ -94,8 +93,8 @@ def create_dataset_samples(object_to_images: Dict[str, List[str]],
     }
     
     # Add columns for each attribute (att_0, att_1, ..., att_n)
-    #for i, attr_name in enumerate(all_attributes):
-    #    samples[f'att_{i}'] = []
+    for i, attr_name in enumerate(all_attributes):
+        samples[attr_name] = []
     
     # Create attribute to index mapping
     attribute_to_idx = {attr: i for i, attr in enumerate(all_attributes)}
@@ -212,21 +211,20 @@ def create_dataset(
     logging.info(f"  Test: {len(test_dataset)} samples")
     
     # Save the dataset
-    output_path = Path(output_dir) / dataset_name
+    output_path = Path(output_dir)
     dataset_dict.save_to_disk(str(output_path))
     
     logging.info(f"Dataset saved to: {output_path}")
     
     # Save metadata
     metadata = {
-        'dataset_name': dataset_name,
+        'dataset_name': output_path.stem,
         'num_samples': len(dataset),
         'num_attributes': num_attributes,
         'attribute_names': all_attributes,
-        'num_objects': len(concept_to_onehot),
+        'num_objects': len(concept_to_attributes),
         'splits': {
             'train': len(train_dataset),
-            'validation': len(val_dataset),
             'test': len(test_dataset)
         },
         'concept_file': concept_file,
@@ -243,48 +241,6 @@ def create_dataset(
     return dataset_dict
 
 
-def inspect_dataset(dataset_dict: DatasetDict, num_samples: int = 3):
-    """
-    Inspect a few samples from the dataset.
-    
-    Args:
-        dataset_dict: The dataset to inspect
-        num_samples: Number of samples to show
-    """
-    logging.info("=== Dataset Inspection ===")
-    
-    train_dataset = dataset_dict['train']
-    
-    logging.info(f"Dataset features: {train_dataset.features}")
-    logging.info(f"Number of samples: {len(train_dataset)}")
-    
-    # Get attribute columns
-    attribute_columns = [col for col in train_dataset.column_names if col.startswith('att_')]
-    num_attributes = len(attribute_columns)
-    logging.info(f"Number of attributes: {num_attributes}")
-    
-    # Show a few examples
-    for i in range(min(num_samples, len(train_dataset))):
-        sample = train_dataset[i]
-        
-        logging.info(f"\nSample {i+1}:")
-        logging.info(f"  Image path: {sample['image_path']}")
-        logging.info(f"  Concept: {sample['concept']}")
-        
-        # Count and show active attributes
-        active_attributes = []
-        for j, attr_col in enumerate(attribute_columns):
-            if sample[attr_col] == 1:
-                active_attributes.append(f"att_{j}")
-        
-        logging.info(f"  Active attributes: {len(active_attributes)}/{num_attributes}")
-        logging.info(f"  Active attribute indices: {active_attributes[:10]}{'...' if len(active_attributes) > 10 else ''}")
-        
-        # Show first few attribute values
-        first_attrs = [sample[f'att_{j}'] for j in range(min(10, num_attributes))]
-        logging.info(f"  First 10 attributes: {first_attrs}")
-
-
 if __name__ == '__main__':
     # Create the dataset
     dataset_dict = create_dataset(
@@ -292,6 +248,3 @@ if __name__ == '__main__':
         attribute_file='dataset/mcrae-x-things-taxonomy.json', 
         image_dir='/home/bzq999/data/compmech/image_database_things/object_images',
     )
-    
-    # Inspect the created dataset
-    inspect_dataset(dataset_dict)
