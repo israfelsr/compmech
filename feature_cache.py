@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Tuple, Dict, Any, Optional
 from pathlib import Path
-from datasets import Dataset, load_from_disk, save_to_disk
+from datasets import Dataset, load_from_disk
 from feature_extractors import BaseFeatureExtractor
 
 

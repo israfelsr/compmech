@@ -4,7 +4,6 @@ from experiment_runner import ExperimentRunner
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 def run_baseline_replication(concept_file='mcrae-x-things.json', 
                            attribute_file='mcrae-x-things-taxonomy.json',
                            image_dir='images',

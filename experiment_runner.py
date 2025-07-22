@@ -19,10 +19,10 @@ class ExperimentRunner:
     across different models and configurations.
     """
     
-    def __init__(self, concept_file='mcrae-x-things.json', 
-                 attribute_file='mcrae-x-things-taxonomy.json',
+    def __init__(self, concept_file='dataset/mcrae-x-things.json', 
+                 attribute_file='dataset/mcrae-x-things-taxonomy.json',
                  image_dir='images', results_dir='results',
-                 cache_dir='cached_features', use_wandb=False,
+                 cache_dir='/home/bzq999/data/compmech/features/', use_wandb=False,
                  wandb_project='attribute-probes', wandb_entity=None):
         """
         Initialize the experiment runner.
