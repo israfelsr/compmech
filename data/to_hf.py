@@ -70,53 +70,63 @@ def create_attribute_mapping(concept_data: List[List[str]], attribute_data: Dict
             concept_to_attributes[concept] = []
         concept_to_attributes[concept].append(attribute)
 
-    # Create one-hot vectors for each concept
-    concept_to_onehot = {}
-    for concept, attributes in concept_to_attributes.items():
-        onehot_vector = np.zeros(num_attributes, dtype=np.int8)
-        for attr in attributes:
-            if attr in attribute_to_idx:
-                onehot_vector[attribute_to_idx[attr]] = 1
-        concept_to_onehot[concept] = onehot_vector.tolist()  # Convert to list for JSON serialization
-    
-    return concept_to_onehot, all_attributes, num_attributes
+    return concept_to_attributes, all_attributes, num_attributes
 
 
 def create_dataset_samples(object_to_images: Dict[str, List[str]], 
-                          concept_to_onehot: Dict[str, List[int]],
+                          concept_to_attributes: Dict[str, List[str]],
                           all_attributes: List[str]) -> Dict[str, List]:
     """
-    Create the dataset samples with image paths, object names, and attribute vectors.
+    Create the dataset samples with image paths, object names, and individual binary attributes.
     
     Args:
         object_to_images: Dictionary mapping object names to image paths
-        concept_to_onehot: Dictionary mapping concepts to one-hot attribute vectors
+        concept_to_attributes: Dictionary mapping concepts to list of their attributes
         all_attributes: List of all attribute names
         
     Returns:
-        Dictionary with lists for 'image_path', 'object_name', 'attributes', 'attribute_names'
+        Dictionary with 'image_path', 'concept', and individual attribute columns (att_0, att_1, ...)
     """
+    # Initialize sample dictionary with image_path and concept
     samples = {
         'image_path': [],
-        'object_name': [],
-        'attributes': [],
-        'attribute_names': all_attributes,  # Store attribute names for reference
-        'num_attributes': len(all_attributes)
+        'concept': [],
     }
+    
+    # Add columns for each attribute (att_0, att_1, ..., att_n)
+    #for i, attr_name in enumerate(all_attributes):
+    #    samples[f'att_{i}'] = []
+    
+    # Create attribute to index mapping
+    attribute_to_idx = {attr: i for i, attr in enumerate(all_attributes)}
     
     # Create samples for each image
     for object_name, image_paths in object_to_images.items():
-        if object_name in concept_to_onehot:
-            attribute_vector = concept_to_onehot[object_name]
+        if object_name in concept_to_attributes:
+            # Get list of attributes for this concept
+            concept_attributes = concept_to_attributes[object_name]
             
+            # Create binary vector for this concept
+            binary_attributes = [0] * len(all_attributes)
+            for attr in concept_attributes:
+                if attr in attribute_to_idx:
+                    idx = attribute_to_idx[attr]
+                    binary_attributes[idx] = 1
+            
+            # Add one sample per image of this concept
             for image_path in image_paths:
                 samples['image_path'].append(image_path)
-                samples['object_name'].append(object_name)
-                samples['attributes'].append(attribute_vector)
+                samples['concept'].append(object_name)
+                
+                # Add binary value for each attribute
+                for att, attr_value in zip(all_attributes, binary_attributes):
+                    samples[att].append(attr_value)
         else:
             logging.warning(f"No attributes found for object '{object_name}', skipping {len(image_paths)} images")
     
     logging.info(f"Created {len(samples['image_path'])} dataset samples")
+    logging.info(f"Dataset has {len(all_attributes)} attributes (att_0 to att_{len(all_attributes)-1})")
+    
     return samples
 
 
@@ -162,13 +172,12 @@ def create_dataset(
     object_to_images = scan_images_in_folders(image_dir)
     
     # Create attribute mappings
-    concept_to_onehot, all_attributes, num_attributes = create_attribute_mapping(concept_data, attribute_data)
+    concept_to_attributes, all_attributes, num_attributes = create_attribute_mapping(concept_data, attribute_data)
     
     logging.info(f"Processing {num_attributes} attributes")
-    logging.info(f"Found attributes for {len(concept_to_onehot)} concepts")
     
     # Create dataset samples
-    dataset_samples = create_dataset_samples(object_to_images, concept_to_onehot, all_attributes)
+    dataset_samples = create_dataset_samples(object_to_images, concept_to_attributes, all_attributes)
     
     # Create HuggingFace dataset
     dataset = Dataset.from_dict(dataset_samples)
@@ -249,29 +258,39 @@ def inspect_dataset(dataset_dict: DatasetDict, num_samples: int = 3):
     logging.info(f"Dataset features: {train_dataset.features}")
     logging.info(f"Number of samples: {len(train_dataset)}")
     
+    # Get attribute columns
+    attribute_columns = [col for col in train_dataset.column_names if col.startswith('att_')]
+    num_attributes = len(attribute_columns)
+    logging.info(f"Number of attributes: {num_attributes}")
+    
     # Show a few examples
     for i in range(min(num_samples, len(train_dataset))):
         sample = train_dataset[i]
         
         logging.info(f"\nSample {i+1}:")
         logging.info(f"  Image path: {sample['image_path']}")
-        logging.info(f"  Object name: {sample['object_name']}")
-        logging.info(f"  Attributes shape: {len(sample['attributes'])}")
-        logging.info(f"  Active attributes: {sum(sample['attributes'])}")
+        logging.info(f"  Concept: {sample['concept']}")
         
-        # Show which attributes are active
-        active_attrs = [sample['attribute_names'][j] for j, val in enumerate(sample['attributes']) if val == 1]
-        logging.info(f"  Active attributes: {active_attrs[:10]}{'...' if len(active_attrs) > 10 else ''}")
+        # Count and show active attributes
+        active_attributes = []
+        for j, attr_col in enumerate(attribute_columns):
+            if sample[attr_col] == 1:
+                active_attributes.append(f"att_{j}")
+        
+        logging.info(f"  Active attributes: {len(active_attributes)}/{num_attributes}")
+        logging.info(f"  Active attribute indices: {active_attributes[:10]}{'...' if len(active_attributes) > 10 else ''}")
+        
+        # Show first few attribute values
+        first_attrs = [sample[f'att_{j}'] for j in range(min(10, num_attributes))]
+        logging.info(f"  First 10 attributes: {first_attrs}")
 
 
 if __name__ == '__main__':
     # Create the dataset
     dataset_dict = create_dataset(
-        concept_file='../dataset/mcrae-x-things.json',
-        attribute_file='../dataset/mcrae-x-things-taxonomy.json', 
+        concept_file='dataset/mcrae-x-things.json',
+        attribute_file='dataset/mcrae-x-things-taxonomy.json', 
         image_dir='/home/bzq999/data/compmech/image_database_things/object_images',
-        output_dir='../hf_dataset',
-        dataset_name='concept_attributes'
     )
     
     # Inspect the created dataset
