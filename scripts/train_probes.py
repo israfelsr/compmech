@@ -94,46 +94,48 @@ def main():
         features_dir=model_config["features_dir"],
     )
 
+    # prepare features and labels
+    features = np.asarray(dataset[model_config["layers"]])
+    labels = dataset.remove_columns(['image_path', 'concept', f'layer_{model_config["layers"]}'])
+
     # Initialize probe trainer
     probe_config = config["probe"]
     probe_trainer = AttributeProbes(
-        dataset=dataset,
+        features=features,
         probe_type=probe_config["type"],
         random_seed=probe_config["seed"],
     )
 
     # Train probes
-    if args.specific_attributes:
+    if probe_config["specific_attribute"]:
         logging.info(
-            f"Training probes for specific attributes: {args.specific_attributes}"
+            f"Training probes for specific attributes: {probe_config["specific_attribute"]}"
         )
         results = probe_trainer.evaluate_specific_attributes(
-            features=features,
             labels=labels,
-            attribute_indices=args.specific_attributes,
-            cv_folds=args.cv_folds,
-            n_repeats=args.n_repeats,
+            attributes=probe_config["specific_attribute"],
+            cv_folds=probe_config["cv_folds"],
+            n_repeats=probe_config["n_repeats"],
         )
     else:
         logging.info("Training probes for all attributes")
         results = probe_trainer.train_all_probes(
-            features=features,
             labels=labels,
-            cv_folds=args.cv_folds,
-            n_repeats=args.n_repeats,
+            cv_folds=probe_config["cv_folds"],
+            n_repeats=probe_config["n_repeats"],
         )
 
     # Save results
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
+    if probe_config['output_dir']:
+        output_dir = Path(probe_config['output_dir'])
     else:
         output_dir = Path("results/probes")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create results filename
-    layers_str = "_".join([col.replace("layer_", "") for col in layer_columns])
-    results_filename = f"probe_results_{args.probe_type}_{layers_str}.json"
+    layers_str = "_".join([col.replace("layer_", "") for col in model_config['layers']])
+    results_filename = f"probe_results_{probe_config["type"]}_{layers_str}.json"
     results_path = output_dir / results_filename
 
     # Save results to JSON
@@ -145,7 +147,7 @@ def main():
     # Print summary
     print(f"\nProbe Training Summary:")
     print(f"- Probe type: {args.probe_type}")
-    print(f"- Layers used: {layer_columns}")
+    print(f"- Layers used: {model_config['layers']}")
     print(f"- Feature dimension: {features.shape[1]}")
     print(f"- Number of samples: {features.shape[0]}")
     print(f"- Number of attributes tested: {results['summary']['n_attributes_tested']}")

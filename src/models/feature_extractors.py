@@ -231,7 +231,7 @@ class DINOv2FeatureExtractor(BaseFeatureExtractor):
                     for i, path in enumerate(batch_image_paths):
                         all_layers_embeddings[layer_name][path] = cls_token_features[i]
 
-                last_layer_name = "last"
+                last_layer_name = "layer_last"
                 last_hidden_state = outputs.last_hidden_state
                 cls_token_features = last_hidden_state[:, 0, :].cpu().numpy()
 
