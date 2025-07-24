@@ -134,9 +134,9 @@ class AttributeProbes:
         num_attributes = len(column_names)
 
         for attr in tqdm(column_names, desc="Training attribute probes"):
-            labels = np.asarray(labels[attr])
+            attr_labels = np.asarray(labels[attr])
             results = self.train_single_probe(
-                self.features, labels, attr, cv_folds, n_repeats
+                self.features, attr_labels, attr, cv_folds, n_repeats
             )
             if results is not None:
                 all_results.append(results)
@@ -203,7 +203,12 @@ class AttributeProbes:
     def _create_probe(self):
         """Create a probe based on the specified type."""
         if self.probe_type == "logistic":
-            return LogisticRegression(max_iter=1000, random_state=self.random_seed)
+            return LogisticRegression(
+                max_iter=1000,
+                random_state=self.random_seed,
+                n_jobs=-1,
+                tol=1e-3,
+            )
         elif self.probe_type == "linear":
             from sklearn.linear_model import LinearRegression
 

@@ -52,9 +52,10 @@ def main():
         choices=["logistic", "linear", "mlp"],
         help="Override dataset path from config",
     )
-    parser.add_argument("--cv-folds", type=int, help="Number of cross-validation folds")
-    parser.add_argument("--n-repeats", type=int, help="Number of CV repeats")
-    parser.add_argument("--output-dir", type=str, help="Directory to save results")
+    parser.add_argument("--layer", type=int, help="Override layer")
+    parser.add_argument("--cv-folds", type=int, help="Override cross-validation folds")
+    parser.add_argument("--n-repeats", type=int, help="Override of CV repeats")
+    parser.add_argument("--output_dir", type=str, help="Override directory for results")
     parser.add_argument(
         "--specific-attributes",
         nargs="+",
@@ -76,7 +77,7 @@ def main():
     dataset = load_from_disk(dataset_path)
 
     model_config = config["model"]
-    layer_idx = model_config["layers"]
+    layer_idx = model_config["layers"] or args.layer
     logging.info(f"Will probe layer: {layer_idx}")
 
     # Get layer features
@@ -127,8 +128,8 @@ def main():
         )
 
     # Save results
-    if probe_config["output_dir"]:
-        output_dir = Path(probe_config["output_dir"])
+    if args.output_dir:
+        output_dir = Path(probe_config["output_dir"]) or args.output_dir
     else:
         output_dir = Path("results/probes")
 
