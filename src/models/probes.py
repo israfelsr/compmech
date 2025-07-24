@@ -34,7 +34,7 @@ class AttributeProbes:
         self,
         features: np.ndarray,
         labels: np.ndarray,
-        attribute_idx: int,
+        attribute: str,
         cv_folds: int = 5,
         n_repeats: int = 2,
     ) -> Optional[Dict]:
@@ -44,7 +44,6 @@ class AttributeProbes:
         Args:
             features: Input features (N, D)
             labels: All attribute labels (N, num_attributes)
-            attribute_idx: Index of the target attribute
             cv_folds: Number of cross-validation folds
             n_repeats: Number of times to repeat CV
 
@@ -52,13 +51,11 @@ class AttributeProbes:
             dict: Results containing performance metrics
         """
         # Get binary labels for this specific attribute
-        y = labels[:, attribute_idx]
+        y = labels
 
         # Skip attributes with insufficient positive examples
         if np.sum(y) < cv_folds or np.sum(1 - y) < cv_folds:
-            logging.warning(
-                f"Skipping attribute {attribute_idx}: insufficient examples"
-            )
+            logging.warning(f"Skipping attribute {attribute}: insufficient examples")
             return None
 
         all_scores = {"f1": [], "accuracy": [], "precision": [], "recall": []}
@@ -99,14 +96,10 @@ class AttributeProbes:
 
         # Create results dictionary
         results = {
-            "attribute_idx": attribute_idx,
+            "attribute": attribute,
             "n_positive": int(np.sum(y)),
             "n_total": len(y),
         }
-
-        # Add dataset attribute name if available
-        if self.dataset and hasattr(self.dataset, "idx_to_attribute"):
-            results["attribute_name"] = self.dataset.idx_to_attribute[attribute_idx]
 
         # Add mean and std for each metric
         for metric, scores in all_scores.items():
@@ -162,7 +155,7 @@ class AttributeProbes:
 
     def evaluate_specific_attributes(
         self,
-        dataset,
+        labels,
         attributes: List[str],
         cv_folds: int = 5,
         n_repeats: int = 2,
@@ -184,7 +177,7 @@ class AttributeProbes:
 
         all_results = []
         for attr in tqdm(attributes, desc="Training specific attribute probes"):
-            labels = np.asarray(dataset[attr])
+            labels = np.asarray(labels[attr])
             results = self.train_single_probe(
                 self.features, labels, attr, cv_folds, n_repeats
             )
