@@ -50,7 +50,7 @@ class BaseFeatureExtractor(ABC):
         dataset: Dataset,
         layers: Union[str, int, List[Union[str, int]]] = "last",
         batch_size: int = 32,
-        features_base_dir: str = "/home/bzq999/data/compmech/features/",
+        features_dir: str = "/home/bzq999/data/compmech/features/",
     ) -> Dataset:
         """
         Add feature columns to a HuggingFace dataset.
@@ -59,7 +59,7 @@ class BaseFeatureExtractor(ABC):
             dataset: Input dataset with 'image_path' column
             layers: Layer(s) to extract features from
             batch_size: Processing batch size
-            features_base_dir: Base directory to save feature datasets
+            features_dir: Base directory to save feature datasets
 
         Returns:
             Dataset with added feature columns
@@ -77,9 +77,7 @@ class BaseFeatureExtractor(ABC):
         # Process each layer and save
         for layer in layers:
             model_name = getattr(self, "model_name", "unknown_model")
-            feature_dataset_path = (
-                Path(features_base_dir) / model_name / f"layer_{layer}.pt"
-            )
+            feature_dataset_path = Path(features_dir) / model_name / f"layer_{layer}.pt"
             if feature_dataset_path.exists():
                 logging.info(
                     f"Loading existing feature dataset from {feature_dataset_path}"

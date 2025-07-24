@@ -5,10 +5,6 @@ model:
   layer: -1
   batch_size: 32
   device: auto
-
-extraction:
-  layers:
-    - last
   features_base_dir: /home/bzq999/data/compmech/features
 
 dataset:

@@ -46,7 +46,7 @@ def main():
         "--dataset-path", type=str, help="Override dataset path from config"
     )
     parser.add_argument(
-        "--output-path", type=str, help="Override output path from config"
+        "--features_dir", type=str, help="Override output path from config"
     )
 
     args = parser.parse_args()
@@ -59,14 +59,12 @@ def main():
 
     # Override paths if provided
     dataset_path = args.dataset_path or config["dataset"]["path"]
-    output_path = args.output_path or config["dataset"]["output_path"]
+    features_dir = args.dataset_path or config["model"]["features_dir"]
 
     # Create output directory
-    os.makedirs(output_path, exist_ok=True)
-    os.makedirs(config["extraction"]["features_base_dir"], exist_ok=True)
+    os.makedirs(features_dir, exist_ok=True)
 
     # Load dataset
-    logging.info(f"Loading dataset from {dataset_path}")
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
@@ -84,12 +82,11 @@ def main():
     logging.info(f"Initialized {model_config['type']} feature extractor")
 
     # Extract features and add to dataset
-    extraction_config = config["extraction"]
     dataset_with_features = extractor.add_features_to_dataset(
         dataset=dataset,
         layers=extraction_config["layers"],
         batch_size=model_config["batch_size"],
-        features_base_dir=extraction_config["features_base_dir"],
+        features_dir=extraction_config["features_dir"],
     )
 
     # Save dataset with features
