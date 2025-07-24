@@ -3,8 +3,18 @@ model:
   model_name: dinov2-base
   model_path: /home/bzq999/data/compmech/models/dinov2-base/
   batch_size: 32
+  layers: 'last'
   device: auto
   features_dir: /home/bzq999/data/compmech/features
+
+probe:
+  type: logistic
+  cv_folds: 5
+  n_repeats: 2
+  output_dir: results/
+  seed: 42
+  specific_attributes:
+
 
 dataset:
   path: /home/bzq999/data/compmech/mcrae-x-things.hf/

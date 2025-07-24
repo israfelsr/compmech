@@ -82,7 +82,9 @@ class BaseFeatureExtractor(ABC):
             if feature_dataset_path.exists():
                 logging.info(f"Loading cached features for layer {layer}")
                 try:
-                    cached_layers_features[layer] = torch.load(feature_dataset_path)
+                    cached_layers_features[layer] = torch.load(
+                        feature_dataset_path, weights_only=False
+                    )
                     logging.info(
                         f"Loaded {len(cached_layers_features[layer])} cached features for layer {layer}"
                     )
@@ -97,7 +99,7 @@ class BaseFeatureExtractor(ABC):
         # Extract all features at once if needed
         if layers_to_extract:
             logging.info(f"Extracting features for {len(layers_to_extract)} layers...")
-            all_layers_features = self.extract_all_features(dataset)
+            all_layers_features = self.extract_features(dataset)
 
             # Save all extracted features
             for layer_name, layer_features in all_layers_features.items():
@@ -171,7 +173,7 @@ class DINOv2FeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
-    def extract_all_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
+    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract features from all layers of the dataset using DINOv2.
 
