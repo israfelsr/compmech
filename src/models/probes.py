@@ -130,16 +130,18 @@ class AttributeProbes:
         logging.info(f"Training {self.probe_type} probes for all attributes...")
 
         all_results = []
-        num_attributes = len(labels[0].keys())
+        column_names = labels.column_names
+        num_attributes = len(column_names)
 
-        for attr_idx in tqdm(range(num_attributes), desc="Training attribute probes"):
+        for attr in tqdm(column_names, desc="Training attribute probes"):
+            labels = np.asarray(labels[attr])
             results = self.train_single_probe(
-                self.features, labels, attr_idx, cv_folds, n_repeats
+                self.features, labels, attr, cv_folds, n_repeats
             )
             if results is not None:
                 all_results.append(results)
                 logging.info(
-                    f"Attribute {attr_idx}: F1 = {results['mean_f1']:.4f} ± {results['std_f1']:.4f}"
+                    f"Attribute {attr}: F1 = {results['mean_f1']:.4f} ± {results['std_f1']:.4f}"
                 )
 
         # Calculate summary statistics
