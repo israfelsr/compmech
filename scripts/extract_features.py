@@ -74,7 +74,6 @@ def main():
         extractor_type=model_config["type"],
         model_name=model_config["model_name"],
         model_path=model_config["model_path"],
-        layer=model_config["layer"],
         batch_size=model_config["batch_size"],
         device=model_config["device"],
     )
@@ -84,23 +83,11 @@ def main():
     # Extract features and add to dataset
     dataset_with_features = extractor.add_features_to_dataset(
         dataset=dataset,
-        layers=extraction_config["layers"],
-        batch_size=model_config["batch_size"],
-        features_dir=extraction_config["features_dir"],
+        layers=model_config["layers"],
+        features_dir=model_config["features_dir"],
     )
 
-    # Save dataset with features
-    logging.info(f"Saving dataset with features to {output_path}")
-    dataset_with_features.save_to_disk(output_path)
-
     logging.info("Feature extraction completed successfully!")
-
-    # Print summary
-    print(f"\nExtraction Summary:")
-    print(f"- Original dataset size: {len(dataset)}")
-    print(f"- Features extracted from layers: {extraction_config['layers']}")
-    print(f"- Model used: {model_config['model_path']}")
-    print(f"- Dataset with features saved to: {output_path}")
 
 
 if __name__ == "__main__":

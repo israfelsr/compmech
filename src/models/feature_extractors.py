@@ -49,7 +49,6 @@ class BaseFeatureExtractor(ABC):
         self,
         dataset: Dataset,
         layers: Union[str, int, List[Union[str, int]]] = "last",
-        batch_size: int = 32,
         features_dir: str = "/home/bzq999/data/compmech/features/",
     ) -> Dataset:
         """
@@ -127,7 +126,6 @@ class DINOv2FeatureExtractor(BaseFeatureExtractor):
         self,
         model_name="None",
         model_path="facebook/dinov2-base",
-        layer="last",
         batch_size=32,
         device="auto",
     ):
@@ -145,7 +143,7 @@ class DINOv2FeatureExtractor(BaseFeatureExtractor):
 
         # Load model and processor
         self.processor = AutoImageProcessor.from_pretrained(model_path, use_fast=True)
-        self.model = AutoModel.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_path)
         self.model.to(self.device)
         self.model.eval()
 
