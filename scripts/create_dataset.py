@@ -227,12 +227,12 @@ def create_dataset(
 
     logging.info(f"Metadata saved to: {metadata_path}")
 
-    return dataset_dict
+    return dataset
 
 
 if __name__ == "__main__":
     # Create the dataset
-    dataset_dict = create_dataset(
+    dataset = create_dataset(
         concept_file="dataset/mcrae-x-things.json",
         attribute_file="dataset/mcrae-x-things-taxonomy.json",
         image_dir="/home/bzq999/data/compmech/image_database_things/object_images",

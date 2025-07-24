@@ -1,0 +1,15 @@
+model:
+  type: dinov2
+  model_name: dinov2-base
+  model_path: /home/bzq999/data/compmech/models/dinov2-base/
+  layer: -1
+  batch_size: 32
+  device: auto
+
+extraction:
+  layers:
+    - last
+  features_base_dir: /home/bzq999/data/compmech/features
+
+dataset:
+  path: /home/bzq999/data/compmech/mcrae-x-things.hf/

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=create_dataset  # A descriptive name for your job
-#SBATCH --output=create_dataset_%j.out # Standard output file (stdout)
+#SBATCH --output=slurm/create_dataset_%j.out # Standard output file (stdout)
 #SBATCH --ntasks=1                   # Request 1 task (process)
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
