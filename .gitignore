@@ -76,3 +76,4 @@ wandb/
 structure.txt
 plots/
 results/
+slurm/

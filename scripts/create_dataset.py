@@ -182,15 +182,13 @@ def create_concept_only_samples(
 
         # Add sample for this concept
         samples["concept"].append(concept_name)
-        
+
         # Add binary value for each attribute
         for attr_name, attr_value in zip(all_attributes, binary_attributes):
             samples[attr_name].append(attr_value)
 
     logging.info(f"Created {len(samples['concept'])} concept-only dataset samples")
-    logging.info(
-        f"Concept dataset has {len(all_attributes)} attributes"
-    )
+    logging.info(f"Concept dataset has {len(all_attributes)} attributes")
 
     return samples
 
@@ -258,7 +256,9 @@ def create_dataset(
     concept_only_dataset = Dataset.from_dict(concept_only_samples)
 
     logging.info(f"Created image dataset with {len(dataset)} samples")
-    logging.info(f"Created concept-only dataset with {len(concept_only_dataset)} samples")
+    logging.info(
+        f"Created concept-only dataset with {len(concept_only_dataset)} samples"
+    )
     logging.info(f"Image dataset features: {dataset.features}")
     logging.info(f"Concept-only dataset features: {concept_only_dataset.features}")
 
