@@ -163,13 +163,13 @@ def category_breakdown(results, layer, taxonomy, metric="f1", save_path=None):
     plt.xticks(x_pos, categories, rotation=45, ha="right")
     plt.grid(True, alpha=0.3, axis="y")
 
-    # Add count labels on bars
-    for i, (bar, count) in enumerate(zip(bars, counts)):
+    # Add performance value and count labels on bars
+    for i, (bar, count, mean_val) in enumerate(zip(bars, counts, means)):
         height = bar.get_height()
         plt.text(
             bar.get_x() + bar.get_width() / 2.0,
             height + stds[i] + 0.01,
-            f"n={count}",
+            f"{mean_val:.2f}%\nn={count}",
             ha="center",
             va="bottom",
             fontsize=9,

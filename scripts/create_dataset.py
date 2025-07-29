@@ -145,30 +145,79 @@ def create_dataset_samples(
     return samples
 
 
+def create_concept_only_samples(
+    concept_to_attributes: Dict[str, List[str]],
+    all_attributes: List[str],
+) -> Dict[str, List]:
+    """
+    Create concept-only dataset samples with only concepts and their binary attributes (no images).
+
+    Args:
+        concept_to_attributes: Dictionary mapping concepts to list of their attributes
+        all_attributes: List of all attribute names
+
+    Returns:
+        Dictionary with 'concept' and individual attribute columns
+    """
+    # Initialize sample dictionary with concept only
+    samples = {
+        "concept": [],
+    }
+
+    # Add columns for each attribute
+    for attr_name in all_attributes:
+        samples[attr_name] = []
+
+    # Create attribute to index mapping
+    attribute_to_idx = {attr: i for i, attr in enumerate(all_attributes)}
+
+    # Create one sample per concept
+    for concept_name, concept_attributes in concept_to_attributes.items():
+        # Create binary vector for this concept
+        binary_attributes = [0] * len(all_attributes)
+        for attr in concept_attributes:
+            if attr in attribute_to_idx:
+                idx = attribute_to_idx[attr]
+                binary_attributes[idx] = 1
+
+        # Add sample for this concept
+        samples["concept"].append(concept_name)
+        
+        # Add binary value for each attribute
+        for attr_name, attr_value in zip(all_attributes, binary_attributes):
+            samples[attr_name].append(attr_value)
+
+    logging.info(f"Created {len(samples['concept'])} concept-only dataset samples")
+    logging.info(
+        f"Concept dataset has {len(all_attributes)} attributes"
+    )
+
+    return samples
+
+
 def create_dataset(
     concept_file="dataset/mcrae-x-things.json",
     attribute_file="dataset/mcrae-x-things-taxonomy.json",
     image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
     output_dir="/home/bzq999/data/compmech/mcrae-x-things.hf",
+    concept_only_output_dir="/home/bzq999/data/compmech/mcrae-x-things-concepts-only.hf",
 ):
     """
-    Create a HuggingFace dataset from the concept-attribute data and images.
+    Create HuggingFace datasets from the concept-attribute data and images.
+    Creates both an image-based dataset and a concept-only dataset in parallel.
 
     Args:
         concept_file: Path to JSON file with concept-attribute pairs
         attribute_file: Path to JSON file with attribute taxonomy
         image_dir: Path to directory containing object folders with images
-        output_dir: Directory to save the HuggingFace dataset
-        dataset_name: Name for the dataset
-        train_split: Proportion for training set
-        val_split: Proportion for validation set
-        test_split: Proportion for test set
+        output_dir: Directory to save the image-based HuggingFace dataset
+        concept_only_output_dir: Directory to save the concept-only HuggingFace dataset
 
     Returns:
-        DatasetDict with train/val/test splits
+        Tuple of (image_dataset, concept_only_dataset)
     """
 
-    logging.info(f"Creating HuggingFace dataset from:")
+    logging.info(f"Creating HuggingFace datasets from:")
     logging.info(f"  Concepts: {concept_file}")
     logging.info(f"  Attributes: {attribute_file}")
     logging.info(f"  Images: {image_dir}")
@@ -192,26 +241,41 @@ def create_dataset(
 
     logging.info(f"Processing {num_attributes} attributes")
 
-    # Create dataset samples
+    # Create image-based dataset samples
+    logging.info("Creating image-based dataset...")
     dataset_samples = create_dataset_samples(
         object_to_images, concept_to_attributes, all_attributes
     )
 
-    # Create HuggingFace dataset
+    # Create concept-only dataset samples
+    logging.info("Creating concept-only dataset...")
+    concept_only_samples = create_concept_only_samples(
+        concept_to_attributes, all_attributes
+    )
+
+    # Create HuggingFace datasets
     dataset = Dataset.from_dict(dataset_samples)
+    concept_only_dataset = Dataset.from_dict(concept_only_samples)
 
-    logging.info(f"Created dataset with {len(dataset)} samples")
-    logging.info(f"Dataset features: {dataset.features}")
+    logging.info(f"Created image dataset with {len(dataset)} samples")
+    logging.info(f"Created concept-only dataset with {len(concept_only_dataset)} samples")
+    logging.info(f"Image dataset features: {dataset.features}")
+    logging.info(f"Concept-only dataset features: {concept_only_dataset.features}")
 
-    # Save the dataset
+    # Save the image-based dataset
     output_path = Path(output_dir)
     dataset.save_to_disk(str(output_path))
+    logging.info(f"Image dataset saved to: {output_path}")
 
-    logging.info(f"Dataset saved to: {output_path}")
+    # Save the concept-only dataset
+    concept_only_output_path = Path(concept_only_output_dir)
+    concept_only_dataset.save_to_disk(str(concept_only_output_path))
+    logging.info(f"Concept-only dataset saved to: {concept_only_output_path}")
 
-    # Save metadata
+    # Save metadata for image dataset
     metadata = {
         "dataset_name": output_path.stem,
+        "dataset_type": "image_based",
         "num_samples": len(dataset),
         "num_attributes": num_attributes,
         "attribute_names": all_attributes,
@@ -224,15 +288,31 @@ def create_dataset(
     metadata_path = output_path / "metadata.json"
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
+    logging.info(f"Image dataset metadata saved to: {metadata_path}")
 
-    logging.info(f"Metadata saved to: {metadata_path}")
+    # Save metadata for concept-only dataset
+    concept_metadata = {
+        "dataset_name": concept_only_output_path.stem,
+        "dataset_type": "concept_only",
+        "num_samples": len(concept_only_dataset),
+        "num_attributes": num_attributes,
+        "attribute_names": all_attributes,
+        "num_objects": len(concept_to_attributes),
+        "concept_file": concept_file,
+        "attribute_file": attribute_file,
+    }
 
-    return dataset
+    concept_metadata_path = concept_only_output_path / "metadata.json"
+    with open(concept_metadata_path, "w") as f:
+        json.dump(concept_metadata, f, indent=2)
+    logging.info(f"Concept-only dataset metadata saved to: {concept_metadata_path}")
+
+    return dataset, concept_only_dataset
 
 
 if __name__ == "__main__":
-    # Create the dataset
-    dataset = create_dataset(
+    # Create both datasets
+    image_dataset, concept_only_dataset = create_dataset(
         concept_file="dataset/mcrae-x-things.json",
         attribute_file="dataset/mcrae-x-things-taxonomy.json",
         image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
