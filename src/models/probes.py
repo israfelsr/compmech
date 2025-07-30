@@ -53,14 +53,22 @@ class AttributeProbes:
             concept_indices[concept].append(i)
 
         self.concept_to_indices = {
-            concept: np.array(
-                indices, dtype=np.int32
-            )  # Use int32 for memory efficiency
+            concept: np.array(indices, dtype=np.int32)
             for concept, indices in concept_indices.items()
         }
 
         labels = dataset.remove_columns(["image_path", layer]).to_pandas()
         self.unique_concepts = labels.groupby("concept").first().reset_index()
+
+    def _generate_random_predictions(self, y_true, random_seed=None):
+        """Generate random predictions with same class distribution as y_true"""
+        np.random.seed(random_seed)
+
+        # Strategy 1: Random predictions with same positive rate as validation set
+        positive_rate = np.mean(y_true)
+        y_random = np.random.binomial(1, positive_rate, size=len(y_true))
+
+        return y_random
 
     def train_single_probe(
         self,
@@ -91,6 +99,7 @@ class AttributeProbes:
             return None
 
         all_scores = {"f1": [], "accuracy": [], "precision": [], "recall": []}
+        baseline_scores = {"f1": [], "accuracy": [], "precision": [], "recall": []}
 
         # Repeat cross-validation multiple times
         for repeat in range(n_repeats):
@@ -137,6 +146,23 @@ class AttributeProbes:
                     recall_score(y_val, y_pred, average="binary", zero_division=0)
                 )
 
+                # Random baseline evaluation
+                y_random = self._generate_random_predictions(
+                    y_val, random_seed=self.random_seed + repeat
+                )
+
+                # Calculate baseline metrics
+                baseline_scores["f1"].append(
+                    f1_score(y_val, y_random, average="binary", zero_division=0)
+                )
+                baseline_scores["accuracy"].append(accuracy_score(y_val, y_random))
+                baseline_scores["precision"].append(
+                    precision_score(y_val, y_random, average="binary", zero_division=0)
+                )
+                baseline_scores["recall"].append(
+                    recall_score(y_val, y_random, average="binary", zero_division=0)
+                )
+
         # Create results dictionary
         results = {
             "attribute": attribute,
@@ -149,6 +175,17 @@ class AttributeProbes:
             results[f"mean_{metric}"] = np.mean(scores)
             results[f"std_{metric}"] = np.std(scores)
             results[f"{metric}_scores"] = scores
+
+        # Add baseline results
+        for metric, scores in baseline_scores.items():
+            results[f"baseline_mean_{metric}"] = np.mean(scores)
+            results[f"baseline_std_{metric}"] = np.std(scores)
+            results[f"baseline_{metric}_scores"] = scores
+
+        # Add improvement over baseline
+        for metric in ["f1", "accuracy", "precision", "recall"]:
+            improvement = results[f"mean_{metric}"] - results[f"baseline_mean_{metric}"]
+            results[f"{metric}_improvement"] = improvement
 
         return results
 
