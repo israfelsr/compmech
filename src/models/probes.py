@@ -36,9 +36,31 @@ class AttributeProbes:
         self.layer = layer
         self.probe_type = probe_type
         self.random_seed = random_seed
-        self.trained_probes = {}
-        labels = dataset.remove_columns(["image_path", layer]).to_pandas()
-        self.unique_concepts = labels.groupby("concept").first().reset_index()
+
+        # Pre-compute
+        self.features = np.stack(self.dataset[layer].tolist())
+        attribute_cols = [
+            col
+            for col in self.dataset.columns
+            if col not in ["image_path", "concept", layer]
+        ]
+        self.label_arrays = {attr: self.dataset[attr].values for attr in attribute_cols}
+
+        # Create concept to feature indices mapping
+        self.concept_to_indices = {}
+        for i, concept in enumerate(self.dataset["concept"]):
+            if concept not in self.concept_to_indices:
+                self.concept_to_indices[concept] = []
+            self.concept_to_indices[concept].append(i)
+
+        # Convert to numpy arrays for faster indexing
+        for concept in self.concept_to_indices:
+            self.concept_to_indices[concept] = np.array(
+                self.concept_to_indices[concept]
+            )
+        import code
+
+        code.interact(local=locals())
 
     def train_single_probe(
         self,
@@ -77,15 +99,17 @@ class AttributeProbes:
             )
 
             for train_idx, val_idx in skf.split(concepts, labels):
-                concepts_train, concepts_val = concepts[train_idx], concepts[val_idx]
+                # concepts_train, concepts_val = concepts[train_idx], concepts[val_idx]
 
-                train = self.dataset[self.dataset["concept"].isin(concepts_train)]
-                val = self.dataset[self.dataset["concept"].isin(concepts_val)]
+                # train = self.dataset[self.dataset["concept"].isin(concepts_train)]
+                # val = self.dataset[self.dataset["concept"].isin(concepts_val)]
 
-                X_train = np.stack(train[self.layer].tolist())
-                X_val = np.stack(val[self.layer].tolist())
-                y_train = np.asarray(train[attribute].tolist())
-                y_val = np.asarray(val[attribute].tolist())
+                # X_train = np.stack(train[self.layer].tolist())
+                # X_val = np.stack(val[self.layer].tolist())
+                # y_train = np.asarray(train[attribute].tolist())
+                # y_val = np.asarray(val[attribute].tolist())
+                concepts_train = concepts.iloc[train_idx]
+                concepts_val = concepts.iloc[val_idx]
 
                 # # Standardize features
                 # scaler = StandardScaler()
