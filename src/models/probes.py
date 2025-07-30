@@ -32,13 +32,14 @@ class AttributeProbes:
             probe_type: Type of probe to use ('logistic', 'linear', 'mlp')
             random_seed: Random seed for reproducibility
         """
-        self.dataset = dataset
+        self.dataset = dataset.to_pandas()
         self.layer = layer
         self.probe_type = probe_type
         self.random_seed = random_seed
         self.trained_probes = {}
         labels = dataset.remove_columns(["image_path", layer]).to_pandas()
         self.unique_concepts = labels.groupby("concept").first().reset_index()
+        self.features = dataset["concept", layer]
 
     def train_single_probe(
         self,
@@ -81,8 +82,10 @@ class AttributeProbes:
                 train = self.dataset[self.dataset["concept"].isin(concepts_train)]
                 val = self.dataset[self.dataset["concept"].isin(concepts_val)]
 
-                # X_train, X_val = features[train_idx], features[val_idx]
-                # y_train, y_val = y[train_idx], y[val_idx]
+                X_train = np.stack(train[self.layer].tolist())
+                X_val = np.stack(val[self.layer].tolist())
+                y_train = np.asarray(train[self.layer].tolist())
+                y_val = np.asarray(val[self.layer].tolist())
 
                 # # Standardize features
                 # scaler = StandardScaler()
