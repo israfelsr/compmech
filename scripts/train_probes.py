@@ -44,7 +44,7 @@ def main():
         "--config", type=str, required=True, help="Path to configuration YAML file"
     )
     parser.add_argument(
-        "--dataset-path", type=str, help="Override dataset path from config"
+        "--dataset_path", type=str, help="Override dataset path from config"
     )
     parser.add_argument(
         "--probe-type",
@@ -97,13 +97,14 @@ def main():
     )
 
     # prepare features and labels
-    features = np.asarray(dataset[f"layer_{layer_idx}"])
-    labels = dataset.remove_columns(["image_path", "concept", f"layer_{layer_idx}"])
+    # features = dataset["concept", f"layer_{layer_idx}"]
+    # labels = dataset.remove_columns(["image_path", f"layer_{layer_idx}"])
 
     # Initialize probe trainer
     probe_config = config["probe"]
     probe_trainer = AttributeProbes(
-        features=features,
+        dataset=dataset,
+        layer=f"layer_{layer_idx}",
         probe_type=probe_config["type"],
         random_seed=probe_config["seed"],
     )
@@ -114,7 +115,6 @@ def main():
             f"Training probes for specific attributes: {probe_config['specific_attribute']}"
         )
         results = probe_trainer.evaluate_specific_attributes(
-            labels=labels,
             attributes=probe_config["specific_attribute"],
             cv_folds=probe_config["cv_folds"],
             n_repeats=probe_config["n_repeats"],
@@ -122,7 +122,6 @@ def main():
     else:
         logging.info("Training probes for all attributes")
         results = probe_trainer.train_all_probes(
-            labels=labels,
             cv_folds=probe_config["cv_folds"],
             n_repeats=probe_config["n_repeats"],
         )

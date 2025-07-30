@@ -16,24 +16,32 @@ class AttributeProbes:
     Supports different probe types and evaluation strategies.
     """
 
-    def __init__(self, features=None, probe_type="logistic", random_seed=42):
+    def __init__(
+        self,
+        dataset=None,
+        layer: str = None,
+        probe_type="logistic",
+        random_seed=42,
+    ):
         """
         Initialize the AttributeProbes class.
 
         Args:
-            features: features for the examples
+            dataset: dataset for the examples
+            layer: layer as feature
             probe_type: Type of probe to use ('logistic', 'linear', 'mlp')
             random_seed: Random seed for reproducibility
         """
-        self.features = features
+        self.dataset = dataset
+        self.layer = layer
         self.probe_type = probe_type
         self.random_seed = random_seed
         self.trained_probes = {}
+        labels = dataset.remove_columns(["image_path", layer]).to_pandas()
+        self.unique_concepts = labels.groupby("concept").first().reset_index()
 
     def train_single_probe(
         self,
-        features: np.ndarray,
-        labels: np.ndarray,
         attribute: str,
         cv_folds: int = 5,
         n_repeats: int = 2,
@@ -50,11 +58,12 @@ class AttributeProbes:
         Returns:
             dict: Results containing performance metrics
         """
-        # Get binary labels for this specific attribute
-        y = labels
+        # Prepare data
+        concepts = self.unique_concepts["concept"]
+        labels = self.unique_concepts[attribute]
 
         # Skip attributes with insufficient positive examples
-        if np.sum(y) < cv_folds or np.sum(1 - y) < cv_folds:
+        if np.sum(labels) < cv_folds or np.sum(1 - labels) < cv_folds:
             logging.warning(f"Skipping attribute {attribute}: insufficient examples")
             return None
 
@@ -66,9 +75,14 @@ class AttributeProbes:
                 n_splits=cv_folds, shuffle=True, random_state=self.random_seed + repeat
             )
 
-            for train_idx, val_idx in skf.split(features, y):
-                X_train, X_val = features[train_idx], features[val_idx]
-                y_train, y_val = y[train_idx], y[val_idx]
+            for train_idx, val_idx in skf.split(concepts, labels):
+                concepts_train, concepts_val = concepts[train_idx], concepts[val_idx]
+
+                train = self.dataset[self.dataset["concept"].isin(concepts_train)]
+                val = self.dataset[self.dataset["concept"].isin(concepts_val)]
+
+                # X_train, X_val = features[train_idx], features[val_idx]
+                # y_train, y_val = y[train_idx], y[val_idx]
 
                 # # Standardize features
                 # scaler = StandardScaler()
@@ -111,7 +125,6 @@ class AttributeProbes:
 
     def train_all_probes(
         self,
-        labels,
         cv_folds: int = 5,
         n_repeats: int = 2,
     ) -> Dict:
@@ -130,14 +143,10 @@ class AttributeProbes:
         logging.info(f"Training {self.probe_type} probes for all attributes...")
 
         all_results = []
-        column_names = labels.column_names
-        num_attributes = len(column_names)
+        column_names = self.labels.column_names
 
         for attr in tqdm(column_names, desc="Training attribute probes"):
-            attr_labels = np.asarray(labels[attr])
-            results = self.train_single_probe(
-                self.features, attr_labels, attr, cv_folds, n_repeats
-            )
+            results = self.train_single_probe(attr, cv_folds, n_repeats)
             if results is not None:
                 all_results.append(results)
                 logging.info(
@@ -157,7 +166,6 @@ class AttributeProbes:
 
     def evaluate_specific_attributes(
         self,
-        labels,
         attributes: List[str],
         cv_folds: int = 5,
         n_repeats: int = 2,
@@ -166,8 +174,6 @@ class AttributeProbes:
         Train probes for specific attributes only.
 
         Args:
-            features: Input features (N, D)
-            labels: All attribute labels (N, num_attributes)
             attributes: List of attribute indices to evaluate
             cv_folds: Number of cross-validation folds
             n_repeats: Number of times to repeat CV
@@ -179,10 +185,7 @@ class AttributeProbes:
 
         all_results = []
         for attr in tqdm(attributes, desc="Training specific attribute probes"):
-            labels = np.asarray(labels[attr])
-            results = self.train_single_probe(
-                self.features, labels, attr, cv_folds, n_repeats
-            )
+            results = self.train_single_probe(attr, cv_folds, n_repeats)
             if results is not None:
                 all_results.append(results)
                 logging.info(
