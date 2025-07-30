@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import logging
 from typing import Dict, List, Optional, Tuple, Any
+from collections import defaultdict
 
 
 class AttributeProbes:
@@ -47,17 +48,17 @@ class AttributeProbes:
         self.label_arrays = {attr: self.dataset[attr].values for attr in attribute_cols}
 
         # Create concept to feature indices mapping
-        self.concept_to_indices = {}
+        concept_indices = defaultdict(list)
         for i, concept in enumerate(self.dataset["concept"]):
-            if concept not in self.concept_to_indices:
-                self.concept_to_indices[concept] = []
-            self.concept_to_indices[concept].append(i)
+            concept_indices[concept].append(i)
 
-        # Convert to numpy arrays for faster indexing
-        for concept in self.concept_to_indices:
-            self.concept_to_indices[concept] = np.array(
-                self.concept_to_indices[concept]
-            )
+        self.concept_to_indices = {
+            concept: np.array(
+                indices, dtype=np.int32
+            )  # Use int32 for memory efficiency
+            for concept, indices in concept_indices.items()
+        }
+
         labels = dataset.remove_columns(["image_path", layer]).to_pandas()
         self.unique_concepts = labels.groupby("concept").first().reset_index()
 
@@ -171,7 +172,7 @@ class AttributeProbes:
         logging.info(f"Training {self.probe_type} probes for all attributes...")
 
         all_results = []
-        column_names = self.labels.column_names
+        column_names = list(self.label_arrays.keys())
 
         for attr in tqdm(column_names, desc="Training attribute probes"):
             results = self.train_single_probe(attr, cv_folds, n_repeats)
