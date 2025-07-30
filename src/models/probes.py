@@ -58,9 +58,8 @@ class AttributeProbes:
             self.concept_to_indices[concept] = np.array(
                 self.concept_to_indices[concept]
             )
-        import code
-
-        code.interact(local=locals())
+        labels = dataset.remove_columns(["image_path", layer]).to_pandas()
+        self.unique_concepts = labels.groupby("concept").first().reset_index()
 
     def train_single_probe(
         self,
@@ -83,7 +82,7 @@ class AttributeProbes:
         # Prepare data
         concepts = self.unique_concepts["concept"]
         labels = self.unique_concepts[attribute]
-        y = self.dataset[attribute]
+        y = self.label_arrays[attribute]
 
         # Skip attributes with insufficient positive examples
         if np.sum(labels) < cv_folds or np.sum(1 - labels) < cv_folds:
@@ -99,17 +98,19 @@ class AttributeProbes:
             )
 
             for train_idx, val_idx in skf.split(concepts, labels):
-                # concepts_train, concepts_val = concepts[train_idx], concepts[val_idx]
-
-                # train = self.dataset[self.dataset["concept"].isin(concepts_train)]
-                # val = self.dataset[self.dataset["concept"].isin(concepts_val)]
-
-                # X_train = np.stack(train[self.layer].tolist())
-                # X_val = np.stack(val[self.layer].tolist())
-                # y_train = np.asarray(train[attribute].tolist())
-                # y_val = np.asarray(val[attribute].tolist())
                 concepts_train = concepts.iloc[train_idx]
                 concepts_val = concepts.iloc[val_idx]
+                train_mask = np.concatenate(
+                    [self.concept_to_indices[concept] for concept in concepts_train]
+                )
+                val_mask = np.concatenate(
+                    [self.concept_to_indices[concept] for concept in concepts_val]
+                )
+
+                X_train = self.features[train_mask]
+                X_val = self.features[val_mask]
+                y_train = y[train_mask]
+                y_val = y[val_mask]
 
                 # # Standardize features
                 # scaler = StandardScaler()
