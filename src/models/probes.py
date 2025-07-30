@@ -39,7 +39,6 @@ class AttributeProbes:
         self.trained_probes = {}
         labels = dataset.remove_columns(["image_path", layer]).to_pandas()
         self.unique_concepts = labels.groupby("concept").first().reset_index()
-        self.features = dataset["concept", layer]
 
     def train_single_probe(
         self,
@@ -62,6 +61,7 @@ class AttributeProbes:
         # Prepare data
         concepts = self.unique_concepts["concept"]
         labels = self.unique_concepts[attribute]
+        y = self.dataset[attribute]
 
         # Skip attributes with insufficient positive examples
         if np.sum(labels) < cv_folds or np.sum(1 - labels) < cv_folds:
@@ -84,8 +84,8 @@ class AttributeProbes:
 
                 X_train = np.stack(train[self.layer].tolist())
                 X_val = np.stack(val[self.layer].tolist())
-                y_train = np.asarray(train[self.layer].tolist())
-                y_val = np.asarray(val[self.layer].tolist())
+                y_train = np.asarray(train[attribute].tolist())
+                y_val = np.asarray(val[attribute].tolist())
 
                 # # Standardize features
                 # scaler = StandardScaler()

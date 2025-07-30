@@ -132,15 +132,14 @@ def main():
 
     # Save results
     if args.output_dir:
-        output_dir = Path(probe_config["output_dir"]) or args.output_dir
+        output_dir = Path(probe_config["output_dir"] or args.output_dir)
     else:
         output_dir = Path("results/probes")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create results filename
-    layers_str = "_".join([col.replace("layer_", "") for col in layer_idx])
-    results_filename = f"probe_results_{probe_config['type']}_{layers_str}.json"
+    results_filename = f"probe_results_{probe_config['type']}_{layer_idx}.json"
     results_path = output_dir / results_filename
 
     # Save results to JSON
@@ -153,8 +152,8 @@ def main():
     print(f"\nProbe Training Summary:")
     print(f"- Probe type: {args.probe_type}")
     print(f"- Layers used: {layer_idx}")
-    print(f"- Feature dimension: {features.shape[1]}")
-    print(f"- Number of samples: {features.shape[0]}")
+    # print(f"- Feature dimension: {features.shape[1]}")
+    # print(f"- Number of samples: {features.shape[0]}")
     print(f"- Number of attributes tested: {results['summary']['n_attributes_tested']}")
     print(
         f"- Mean F1 score: {results['summary']['mean_f1_across_attributes']:.4f} � {results['summary']['std_f1_across_attributes']:.4f}"

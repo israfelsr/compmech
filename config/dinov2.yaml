@@ -12,7 +12,7 @@ probe:
   n_repeats: 2
   output_dir: results/
   seed: 42
-  specific_attribute: ["a_bird"]
+  specific_attribute: None
 
 
 dataset:
