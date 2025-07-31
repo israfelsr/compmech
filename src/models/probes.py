@@ -148,7 +148,7 @@ class AttributeProbes:
 
                 # Random baseline evaluation
                 y_random = self._generate_random_predictions(
-                    y_val, random_seed=self.random_seed + repeat
+                    y_train, random_seed=self.random_seed + repeat
                 )
 
                 # Calculate baseline metrics
