@@ -60,14 +60,12 @@ class AttributeProbes:
         labels = dataset.remove_columns(["image_path", layer]).to_pandas()
         self.unique_concepts = labels.groupby("concept").first().reset_index()
 
-    def _generate_random_predictions(self, y_true, random_seed=None):
+    def _generate_random_predictions(self, y_true, positive_rate, random_seed=None):
         """Generate random predictions with same class distribution as y_true"""
         np.random.seed(random_seed)
 
         # Strategy 1: Random predictions with same positive rate as validation set
-        positive_rate = np.mean(y_true)
         y_random = np.random.binomial(1, positive_rate, size=len(y_true))
-
         return y_random
 
     def train_single_probe(
@@ -148,7 +146,9 @@ class AttributeProbes:
 
                 # Random baseline evaluation
                 y_random = self._generate_random_predictions(
-                    y_train, random_seed=self.random_seed + repeat
+                    y_val,
+                    np.mean(labels.iloc[train_idx]),
+                    random_seed=self.random_seed + repeat,
                 )
 
                 # Calculate baseline metrics
