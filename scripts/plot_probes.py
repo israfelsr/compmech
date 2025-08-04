@@ -123,31 +123,39 @@ def category_breakdown(results, layer, taxonomy, metric="f1", save_path=None):
 
     # Get all attribute scores for this layer
     individual_results = results[layer]["individual_results"]
-    # Group scores by category
+
+    # Group scores and baselines by category
     category_scores = {}
+    category_baselines = {}
     category_counts = {}
     for result in individual_results:
         attr = result["attribute"]
         score = result[f"mean_{metric}"]
+        baseline = result[f"baseline_mean_{metric}"]
         # Get category from taxonomy
         category = taxonomy.get(attr, "unknown")
         if category not in category_scores:
             category_scores[category] = []
+            category_baselines[category] = []
             category_counts[category] = 0
         category_scores[category].append(score)
+        category_baselines[category].append(baseline)
         category_counts[category] += 1
-    # Calculate mean score per category
+    # Calculate mean score and baseline per category
     category_means = {}
     category_stds = {}
+    category_baseline_means = {}
     for cat, scores in category_scores.items():
         category_means[cat] = np.mean(scores)
         category_stds[cat] = np.std(scores)
+        category_baseline_means[cat] = np.mean(category_baselines[cat])
     # Sort categories by performance
     sorted_categories = sorted(category_means.items(), key=lambda x: x[1], reverse=True)
     categories = [cat for cat, _ in sorted_categories]
     means = [score for _, score in sorted_categories]
     stds = [category_stds[cat] for cat, _ in sorted_categories]
     counts = [category_counts[cat] for cat, _ in sorted_categories]
+    baselines = [category_baseline_means[cat] for cat, _ in sorted_categories]
     # Single bar chart
     plt.figure(figsize=(12, 8))
     colors = plt.cm.Set3(np.linspace(0, 1, len(categories)))
@@ -156,6 +164,32 @@ def category_breakdown(results, layer, taxonomy, metric="f1", save_path=None):
     bars = plt.bar(
         x_pos, means, yerr=stds, capsize=5, color=colors, alpha=0.7, edgecolor="black"
     )
+
+    # Add red baseline markers for each category
+    for i, baseline in enumerate(baselines):
+        plt.plot(
+            [i - 0.4, i + 0.4],
+            [baseline, baseline],
+            color="red",
+            linestyle="--",
+            linewidth=2,
+            alpha=0.8,
+        )
+
+        # Add baseline percentage text in red for each category
+        plt.text(
+            i,
+            baseline - 0.02,
+            f"{baseline:.2f}%",
+            color="red",
+            fontweight="bold",
+            ha="center",
+            va="top",
+            fontsize=8,
+            bbox=dict(
+                boxstyle="round,pad=0.2", facecolor="white", edgecolor="red", alpha=0.8
+            ),
+        )
 
     plt.xlabel("Category")
     plt.ylabel(f"Mean {metric.upper()} Score")
@@ -184,8 +218,11 @@ def category_breakdown(results, layer, taxonomy, metric="f1", save_path=None):
     print("=" * 50)
     for cat, mean_score in sorted_categories:
         std_score = category_stds[cat]
+        baseline_score = category_baseline_means[cat]
         count = category_counts[cat]
-        print(f"{cat:15s}: {mean_score:.3f} ± {std_score:.3f}")
+        print(
+            f"{cat:15s}: {mean_score:.3f} ± {std_score:.3f} (baseline: {baseline_score:.3f})"
+        )
     return category_means, category_counts
 
 
@@ -527,12 +564,32 @@ def main():
         return
     print(f"Found {len(results)} layers: {results.keys()}")
 
-    attr_performance_distribution(results, layer="last", metric="f1")
-    overview_performance(results)
-    if taxonomy:
-        category_breakdown(results, "last", taxonomy)
-        category_breakdown(results, 12, taxonomy)
-        performance_curves(results, taxonomy)
+    if args.save:
+        attr_performance_distribution(
+            results,
+            layer="last",
+            metric="f1",
+            save_path=f"{args.save}/attr_performance_distribution.png",
+        )
+        overview_performance(results, save_path=f"{args.save}/overview_performance.png")
+        if taxonomy:
+            category_breakdown(
+                results,
+                "last",
+                taxonomy,
+                save_path=f"{args.save}/category_breakdown_last.png",
+            )
+            category_breakdown(
+                results,
+                11,
+                taxonomy,
+                save_path=f"{args.save}/category_breakdown_11.png",
+            )
+            performance_curves(
+                results,
+                taxonomy,
+                save_path=f"{args.save}/performance_curves.png",
+            )
 
 
 if __name__ == "__main__":

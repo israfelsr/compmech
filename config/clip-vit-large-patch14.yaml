@@ -1,0 +1,19 @@
+model:
+  type: clip
+  model_name: clip-vit-large-patch14
+  model_path: /home/bzq999/data/compmech/models/clip-vit-large-patch14/
+  batch_size: 32
+  device: auto
+  features_dir: /home/bzq999/data/compmech/features
+  tower_name: vision_model
+
+probe:
+  type: logistic
+  cv_folds: 5
+  n_repeats: 2
+  output_dir: results/
+  seed: 42
+  specific_attribute: ['a_bird']
+
+dataset:
+  path: /home/bzq999/data/compmech/mcrae-x-things.hf/

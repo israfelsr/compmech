@@ -143,18 +143,18 @@ class BaseFeatureExtractor(ABC):
         return merged_dataset
 
 
-class DINOv2FeatureExtractor(BaseFeatureExtractor):
+class FeatureExtractor(BaseFeatureExtractor):
     """Feature extractor using DINOv2 models."""
 
     def __init__(
         self,
-        model_name="None",
+        model_name=None,
         model_path="facebook/dinov2-base",
         batch_size=32,
         device="auto",
     ):
         """
-        Initialize DINOv2 feature extractor.
+        Initialize feature extractor.
 
         Args:
             model_name: HuggingFace model name or path
@@ -324,8 +324,9 @@ class MultiLayerFeatureExtractor(BaseFeatureExtractor):
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
     """Factory function to create feature extractors."""
     extractors = {
-        "dinov2": DINOv2FeatureExtractor,
-        "clip": CLIPFeatureExtractor,
+        "dinov2": FeatureExtractor,
+        "swinv2": FeatureExtractor,
+        "clip": FeatureExtractor,
     }
 
     if extractor_type not in extractors:
