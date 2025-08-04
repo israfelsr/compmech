@@ -152,6 +152,8 @@ class FeatureExtractor(BaseFeatureExtractor):
         model_path="facebook/dinov2-base",
         batch_size=32,
         device="auto",
+        tower_name=None,
+        projection_name=None,
     ):
         """
         Initialize feature extractor.
@@ -170,6 +172,9 @@ class FeatureExtractor(BaseFeatureExtractor):
         self.model = AutoModel.from_pretrained(model_path)
         self.model.to(self.device)
         self.model.eval()
+
+        self.vision_tower = tower_name
+        self.projection = projection_name
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
@@ -214,7 +219,11 @@ class FeatureExtractor(BaseFeatureExtractor):
                 batch_image_paths: List[str] = [
                     p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
                 ]
-                outputs = self.model(pixel_values, output_hidden_states=True)
+                if self.vision_tower:
+                    model = getattr(self.model, self.vision_tower)
+                    outputs = model(pixel_values, output_hidden_states=True)
+                else:
+                    outputs = self.model(pixel_values, output_hidden_states=True)
 
                 # Extract features from all hidden states
                 hidden_states = outputs.hidden_states  # List of tensors for each layer
@@ -231,15 +240,34 @@ class FeatureExtractor(BaseFeatureExtractor):
                     for i, path in enumerate(batch_image_paths):
                         all_layers_embeddings[layer_name][path] = cls_token_features[i]
 
-                last_layer_name = "layer_last"
                 last_hidden_state = outputs.last_hidden_state
-                cls_token_features = last_hidden_state[:, 0, :].cpu().numpy()
+                if not torch.equal(last_hidden_state, outputs["hidden_states"][-1]):
+                    last_layer_name = "layer_last"
+                    cls_token_features = last_hidden_state[:, 0, :].cpu().numpy()
 
-                if last_layer_name not in all_layers_embeddings:
-                    all_layers_embeddings[last_layer_name] = {}
+                    if last_layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[last_layer_name] = {}
 
-                for i, path in enumerate(batch_image_paths):
-                    all_layers_embeddings[last_layer_name][path] = cls_token_features[i]
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[last_layer_name][path] = (
+                            cls_token_features[i]
+                        )
+
+                if self.projection:
+                    projection = getattr(self.model, self.projection)
+                    norm_tensor = last_hidden_state.norm(p=2, dim=-1, keepdim=True)
+                    last_hidden_state = last_hidden_state / norm_tensor
+                    cls_token_features = (
+                        projection(last_hidden_state)[:, 0, :].cpu().numpy()
+                    )
+
+                    if "projection" not in all_layers_embeddings:
+                        all_layers_embeddings["projection"] = {}
+
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings["projection"][path] = cls_token_features[
+                            i
+                        ]
 
         return all_layers_embeddings
 

@@ -76,6 +76,8 @@ def main():
         model_path=model_config["model_path"],
         batch_size=model_config["batch_size"],
         device=model_config["device"],
+        tower_name=model_config["tower_name"],
+        projection_name=model_config["projection_name"],
     )
 
     logging.info(f"Initialized {model_config['type']} feature extractor")
