@@ -7,7 +7,7 @@ model:
   features_dir: /home/bzq999/data/compmech/features
   layers: ["last"]
   tower_name: vision_model
-  projection: visual_projection
+  projection_name: visual_projection
 
 
 probe:

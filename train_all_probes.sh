@@ -10,7 +10,9 @@
 mkdir -p logs
 
 # Define the layers to process (0-12 + last)
-layers=("last" 0 1 2 3 4 5 6 7 8 9 10 11 12)
+#layers=("last" 0 1 2 3 4 5 6 7 8 9 10 11 12)
+layers=("proj" 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24)
+
 
 # Get the current layer from the array index
 current_layer=${layers[$SLURM_ARRAY_TASK_ID]}
@@ -34,9 +36,9 @@ export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # Run the probe training for the specific layer
 
 python scripts/train_probes.py \
-    --config config/dinov2.yaml \
+    --config config/clip-vit-large-patch14.yaml \
     --layer $current_layer \
-    --output_dir results/probes/layer_${current_layer} \
+    --output_dir results/probes/clip-vit-large-patch14/layer_${current_layer} \
 
 echo "Job finished at: $(date)"
 echo "Layer $current_layer completed successfully"

@@ -94,15 +94,11 @@ def main():
         device=model_config["device"],
     )
 
-    dataset = extractor.add_features_to_dataset(
+    dataset = extractor.load_layer_features(
         dataset=dataset,
-        layers=layer_idx,
+        layer=layer_idx,
         features_dir=model_config["features_dir"],
     )
-
-    # prepare features and labels
-    # features = dataset["concept", f"layer_{layer_idx}"]
-    # labels = dataset.remove_columns(["image_path", f"layer_{layer_idx}"])
 
     # Initialize probe trainer
     probe_config = config["probe"]
