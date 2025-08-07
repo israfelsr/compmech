@@ -1,13 +1,13 @@
 model:
   type: clip
-  model_name: clip-vit-large-patch14-336
-  model_path: /home/bzq999/data/compmech/models/clip-vit-large-patch14-336/
+  model_name: llava-1.5-7b-hf
+  model_path: /home/bzq999/data/compmech/models/llava-1.5-7b-hf/
   batch_size: 32
   device: auto
   features_dir: /home/bzq999/data/compmech/features
   layers: ["last"]
-  tower_name: vision_model
-  projection_name: visual_projection
+  tower_name: vision_tower
+  projection_name: multi_modal_projector
 
 
 probe:

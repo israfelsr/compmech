@@ -83,9 +83,8 @@ def main():
     logging.info(f"Initialized {model_config['type']} feature extractor")
 
     # Extract features and add to dataset
-    dataset_with_features = extractor.add_features_to_dataset(
+    dataset_with_features = extractor.extract_and_save(
         dataset=dataset,
-        layers=model_config["layers"],
         features_dir=model_config["features_dir"],
     )
 

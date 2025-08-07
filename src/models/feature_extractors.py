@@ -44,14 +44,21 @@ class BaseFeatureExtractor(ABC):
             "pixel_values": pixel_values,
         }
 
-    def load_layer_features(self, dataset, layer, features_dir):
+    def load_layer_features(
+        self,
+        dataset: Dataset,
+        layer: str,
+        features_dir: str = "/home/bzq999/data/compmech/features/",
+    ):
         if isinstance(layer, list):
             layer = layer[0]
 
         model_name = getattr(self, "model_name", "unknown_model")
         model_features_dir = Path(features_dir) / model_name
         if not model_features_dir.exists():
-            raise FileNotFoundError(f"Features directory does not exist: {model_features_dir}")
+            raise FileNotFoundError(
+                f"Features directory does not exist: {model_features_dir}"
+            )
         feature_dataset_path = model_features_dir / f"layer_{layer}.pt"
         logging.info(f"Loading cached features for layer {layer}")
         cached_layers_features = {}
@@ -85,103 +92,25 @@ class BaseFeatureExtractor(ABC):
 
         return merged_dataset
 
-    def add_features_to_dataset(
+    def extract_and_save(
         self,
         dataset: Dataset,
-        layers: Union[str, int, List[Union[str, int]]] = "last",
         features_dir: str = "/home/bzq999/data/compmech/features/",
-    ) -> Dataset:
-        """
-        Add feature columns to a HuggingFace dataset.
-
-        Args:
-            dataset: Input dataset with 'image_path' column
-            layers: Layer(s) to extract features from
-            features_dir: Base directory to save feature datasets
-
-        Returns:
-            Dataset with added feature columns
-        """
-        # Ensure layers is a list
-        if not isinstance(layers, list):
-            layers = [layers]
-
+    ):
         logging.info(
-            f"Extracting features from layers {layers} for {len(dataset)} samples..."
+            f"Extracting features from all layers for {len(dataset)} samples..."
         )
-
         model_name = getattr(self, "model_name", "unknown_model")
         model_features_dir = Path(features_dir) / model_name
         model_features_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if we need to extract any features
-        layers_to_extract = []
-        cached_layers_features = {}
+        all_layers_features = self.extract_features(dataset)
 
-        for layer in layers:
-            feature_dataset_path = model_features_dir / f"layer_{layer}.pt"
-            if feature_dataset_path.exists():
-                logging.info(f"Loading cached features for layer {layer}")
-                try:
-                    cached_layers_features[layer] = torch.load(
-                        feature_dataset_path, weights_only=False
-                    )
-                    logging.info(
-                        f"Loaded {len(cached_layers_features[layer])} cached features for layer {layer}"
-                    )
-                except Exception as e:
-                    logging.warning(
-                        f"Failed to load cached features for layer {layer}: {e}"
-                    )
-                    layers_to_extract.append(layer)
-            else:
-                layers_to_extract.append(layer)
-
-        # Extract all features at once if needed
-        if layers_to_extract:
-            logging.info(f"Extracting features for {len(layers_to_extract)} layers...")
-            all_layers_features = self.extract_features(dataset)
-
-            # Save all extracted features
-            for layer_name, layer_features in all_layers_features.items():
-                feature_dataset_path = model_features_dir / f"{layer_name}.pt"
-                torch.save(layer_features, feature_dataset_path)
-                logging.info(
-                    f"Saved features for {layer_name} to {feature_dataset_path}"
-                )
-
-                # Add to cached features if it's one of our requested layers
-                layer_key = (
-                    layer_name
-                    if layer_name == "last"
-                    else int(layer_name.split("_")[1])
-                )
-                if layer_key in layers:
-                    cached_layers_features[layer_key] = layer_features
-
-        # Add feature columns to dataset
-        merged_dataset = dataset
-        for layer in layers:
-            features = cached_layers_features[layer]
-            feature_column_name = f"layer_{layer}"
-            feature_values = []
-
-            for sample in dataset:
-                image_path = sample["image_path"]
-                if image_path in features:
-                    feature_values.append(features[image_path].tolist())
-                else:
-                    logging.warning(
-                        f"No features found for {image_path}, using zero vector"
-                    )
-                    feature_dim = len(list(features.values())[0]) if features else 768
-                    feature_values.append(np.zeros(feature_dim).tolist())
-
-            merged_dataset = merged_dataset.add_column(
-                feature_column_name, feature_values
-            )
-
-        return merged_dataset
+        # Save all extracted features
+        for layer_name, layer_features in all_layers_features.items():
+            feature_dataset_path = model_features_dir / f"{layer_name}.pt"
+            torch.save(layer_features, feature_dataset_path)
+            logging.info(f"Saved features for {layer_name} to {feature_dataset_path}")
 
 
 class FeatureExtractor(BaseFeatureExtractor):
