@@ -172,9 +172,8 @@ class FeatureExtractor(BaseFeatureExtractor):
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        bound_preprocess_function = partial(
-            self._preprocess_image_batch, processor=self.processor
-        )
+        def bound_preprocess_function(examples):
+            return self._preprocess_image_batch(examples, self.processor)
 
         processed_dataset = dataset.map(
             bound_preprocess_function,
@@ -317,9 +316,8 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        bound_preprocess_function = partial(
-            self._preprocess_image_batch, processor=self.processor
-        )
+        def bound_preprocess_function(examples):
+            return self._preprocess_image_batch(examples, self.processor)
 
         processed_dataset = dataset.map(
             bound_preprocess_function,
