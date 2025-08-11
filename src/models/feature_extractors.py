@@ -278,8 +278,6 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         # Load model and processor
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
         self.model = AutoModelForVision2Seq.from_pretrained(model_path)
-        self.model.to(self.device)
-        self.model.eval()
 
         self.vision_tower = tower_name
         self.projection = projection_name
@@ -335,8 +333,8 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
             processed_dataset, batch_size=self.batch_size, shuffle=False
         )
 
-        model = attrgetter(self.vision_tower)(self.model)
-        projection = attrgetter(self.projection)(self.model)
+        model = attrgetter(self.vision_tower)(self.model).to(self.device)
+        projection = attrgetter(self.projection)(self.model).to(self.device)
         with torch.no_grad():
             for batch in tqdm(
                 dataloader, desc="Extracting All Layer Features", unit="batch"
