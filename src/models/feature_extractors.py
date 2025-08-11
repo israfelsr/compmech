@@ -287,7 +287,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
-    def _preprocess_image_batch(examples, text, processor):
+    def _preprocess_image_batch(examples, processor):
         """
         Loads images from paths and processes them using the given processor.
         This function is designed to be mapped over a HuggingFace Dataset.
@@ -295,8 +295,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         image_paths = examples["image_path"]
 
         images = [Image.open(path).convert("RGB") for path in image_paths]
-        if text is None:
-            text = [""] * len(images)
+        text = [""] * len(images)
         inputs = processor(images=images, text=text, return_tensors="pt")
         result = {"image_path": image_paths}
         for key, value in inputs.items():
@@ -319,7 +318,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
         bound_preprocess_function = partial(
-            self._preprocess_image_batch, text=None, processor=self.processor
+            self._preprocess_image_batch, processor=self.processor
         )
 
         processed_dataset = dataset.map(
