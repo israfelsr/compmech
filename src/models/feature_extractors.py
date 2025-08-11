@@ -277,10 +277,13 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         # Load model and processor
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
-        self.model = AutoModelForVision2Seq.from_pretrained(model_path)
-
+        model = AutoModelForVision2Seq.from_pretrained(model_path)
         self.vision_tower = tower_name
         self.projection = projection_name
+
+        self.model = attrgetter(self.vision_tower)(model).to(self.device)
+        self.projection = attrgetter(self.projection)(model).to(self.device)
+        del model
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
@@ -333,8 +336,6 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
             processed_dataset, batch_size=self.batch_size, shuffle=False
         )
 
-        model = attrgetter(self.vision_tower)(self.model).to(self.device)
-        projection = attrgetter(self.projection)(self.model).to(self.device)
         with torch.no_grad():
             for batch in tqdm(
                 dataloader, desc="Extracting All Layer Features", unit="batch"
@@ -343,7 +344,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
                 batch_image_paths: List[str] = [
                     p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
                 ]
-                outputs = model(pixel_values, output_hidden_states=True)
+                outputs = self.model(pixel_values, output_hidden_states=True)
 
                 # Extract features from all hidden states
                 hidden_states = outputs.hidden_states  # List of tensors for each layer
@@ -376,7 +377,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
                         ]
 
                 if self.projection:
-                    projected_features = projection(hidden_states[-2][:, 1:, :])
+                    projected_features = self.projection(hidden_states[-2][:, 1:, :])
                     pooled_features = projected_features.mean(dim=1).cpu().numpy()
 
                     if "projection" not in all_layers_embeddings:
