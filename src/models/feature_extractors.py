@@ -2,7 +2,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
-from transformers import AutoImageProcessor, AutoModel
+from transformers import (
+    AutoImageProcessor,
+    AutoModel,
+    AutoProcessor,
+    AutoModelForVision2Seq,
+)
 from tqdm import tqdm
 import logging
 from typing import Union, List, Dict, Any, Tuple
@@ -11,6 +16,7 @@ from datasets import Dataset, load_from_disk
 from pathlib import Path
 from PIL import Image
 from functools import partial
+from operator import attrgetter
 import os
 
 
@@ -28,21 +34,9 @@ class BaseFeatureExtractor(ABC):
         """Extract features from dataset."""
         pass
 
-    @staticmethod
+    @abstractmethod
     def _preprocess_image_batch(examples, processor):
-        """
-        Loads images from paths and processes them using the given processor.
-        This function is designed to be mapped over a HuggingFace Dataset.
-        """
-        image_paths = examples["image_path"]
-
-        images = [Image.open(path).convert("RGB") for path in image_paths]
-
-        pixel_values = processor(images=images, return_tensors="pt")["pixel_values"]
-        return {
-            "image_path": image_paths,
-            "pixel_values": pixel_values,
-        }
+        pass
 
     def load_layer_features(
         self,
@@ -148,6 +142,21 @@ class FeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
+    def _preprocess_image_batch(examples, processor):
+        """
+        Loads images from paths and processes them using the given processor.
+        This function is designed to be mapped over a HuggingFace Dataset.
+        """
+        image_paths = examples["image_path"]
+
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+
+        pixel_values = processor(images=images, return_tensors="pt")["pixel_values"]
+        return {
+            "image_path": image_paths,
+            "pixel_values": pixel_values,
+        }
+
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract features from all layers of the dataset using DINOv2.
@@ -242,89 +251,151 @@ class FeatureExtractor(BaseFeatureExtractor):
         return all_layers_embeddings
 
 
-class CLIPFeatureExtractor(BaseFeatureExtractor):
-    """Feature extractor using CLIP models."""
+class LlavaFeatureExtractor(BaseFeatureExtractor):
+    """Feature extractor using Llava1.5"""
 
     def __init__(
-        self, model_name="openai/clip-vit-base-patch32", batch_size=32, device="auto"
+        self,
+        model_name=None,
+        model_path="llava-hf/llava-1.5-7b-hf",
+        batch_size=32,
+        device="auto",
+        tower_name=None,
+        projection_name=None,
     ):
+        """
+        Initialize feature extractor.
+
+        Args:
+            model_name: HuggingFace model name or path
+            batch_size: Batch size for inference
+            device: Device to run on
+        """
         super().__init__(device)
-        self.model_name = model_name
+        self.model_name = model_name or Path(model_path).stem
         self.batch_size = batch_size
 
-        from transformers import CLIPModel, CLIPProcessor
-
-        self.processor = CLIPProcessor.from_pretrained(model_name)
-        self.model = CLIPModel.from_pretrained(model_name)
+        # Load model and processor
+        self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+        self.model = AutoModelForVision2Seq.from_pretrained(model_path)
         self.model.to(self.device)
         self.model.eval()
 
-        logging.info(f"Loaded {model_name} on {self.device}")
+        self.vision_tower = tower_name
+        self.projection = projection_name
 
-    def extract_features(self, dataset, layer) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract visual features using CLIP."""
-        logging.info(f"Extracting CLIP visual features...")
+        logging.info(f"Loaded model from {model_path} on {self.device}")
+
+    def _preprocess_image_batch(examples, text, processor):
+        """
+        Loads images from paths and processes them using the given processor.
+        This function is designed to be mapped over a HuggingFace Dataset.
+        """
+        image_paths = examples["image_path"]
+
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+        if text is None:
+            text = [""] * len(images)
+        inputs = processor(images=images, text=text, return_tensors="pt")
+        result = {"image_path": image_paths}
+        for key, value in inputs.items():
+            result[key] = value
+        return result
+
+    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
+        """
+        Extract features from all layers of the dataset using DINOv2.
+
+        Args:
+            dataset: HuggingFace Dataset to extract features from
+
+        Returns:
+            Dict mapping layer names to {image_path: features} dictionaries
+        """
+        logging.info(f"Extracting features from all layers of {self.model_name}...")
+
+        # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
+        all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
+
+        bound_preprocess_function = partial(
+            self._preprocess_image_batch, text=None, processor=self.processor
+        )
+
+        processed_dataset = dataset.map(
+            bound_preprocess_function,
+            batched=True,
+            load_from_cache_file=True,
+            desc="Preprocessing Images",
+        )
+        processed_dataset.set_format(
+            type="torch", columns=["pixel_values", "image_path"]
+        )
 
         dataloader = DataLoader(
-            dataset, batch_size=self.batch_size, shuffle=False, num_workers=0
+            processed_dataset, batch_size=self.batch_size, shuffle=False
         )
 
-        all_features = []
-        all_labels = []
-
+        model = attrgetter(self.vision_tower)(self.model)
+        projection = attrgetter(self.projection)(self.model)
         with torch.no_grad():
-            for images, labels in tqdm(dataloader, desc="Extracting CLIP features"):
-                images = images.to(self.device)
+            for batch in tqdm(
+                dataloader, desc="Extracting All Layer Features", unit="batch"
+            ):
+                pixel_values = batch["pixel_values"].to(self.device)
+                batch_image_paths: List[str] = [
+                    p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
+                ]
+                outputs = model(pixel_values, output_hidden_states=True)
 
-                # Get visual features
-                vision_outputs = self.model.vision_model(pixel_values=images)
-                features = vision_outputs.pooler_output
+                # Extract features from all hidden states
+                hidden_states = outputs.hidden_states  # List of tensors for each layer
 
-                all_features.append(features.cpu())
-                all_labels.append(labels.cpu())
+                for layer_idx, layer_hidden_state in enumerate(hidden_states):
+                    layer_name = f"layer_{layer_idx}"
+                    # Apply global average pooling
+                    patch_features = layer_hidden_state[:, 1:, :]  # Remove CLS token
+                    pooled_features = (
+                        patch_features.mean(dim=1).cpu().numpy()
+                    )  # Global average pooling
 
-        features = torch.cat(all_features, dim=0).numpy()
-        labels = torch.cat(all_labels, dim=0).numpy()
+                    # Store features for each image path
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = pooled_features[i]
 
-        logging.info(f"Extracted CLIP features shape: {features.shape}")
+                last_hidden_state = outputs.last_hidden_state
+                if not torch.equal(last_hidden_state, outputs["hidden_states"][-1]):
+                    last_layer_name = "layer_last"
+                    # Remove CLS token and apply global average pooling
+                    patch_features = last_hidden_state[:, 1:, :]
+                    pooled_features = patch_features.mean(dim=1).cpu().numpy()
 
-        return features, labels
+                    if last_layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[last_layer_name] = {}
 
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[last_layer_name][path] = pooled_features[
+                            i
+                        ]
 
-class MultiLayerFeatureExtractor(BaseFeatureExtractor):
-    """Extract features from multiple layers and concatenate them."""
+                if self.projection:
+                    projected_features = projection(hidden_states[-2][:, 1:, :])
+                    pooled_features = projected_features.mean(dim=1).cpu().numpy()
 
-    def __init__(self, base_extractor: BaseFeatureExtractor, layers: list):
-        super().__init__(base_extractor.device)
-        self.base_extractor = base_extractor
-        self.layers = layers
+                    if "projection" not in all_layers_embeddings:
+                        all_layers_embeddings["projection"] = {}
 
-    def extract_features(self, dataset) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract and concatenate features from multiple layers."""
-        all_layer_features = []
-        labels = None
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings["projection"][path] = pooled_features[i]
 
-        for layer in self.layers:
-            self.base_extractor.layer = layer
-            features, labels = self.base_extractor.extract_features(dataset)
-            all_layer_features.append(features)
-
-        # Concatenate features from all layers
-        combined_features = np.concatenate(all_layer_features, axis=1)
-
-        logging.info(
-            f"Combined features from {len(self.layers)} layers: {combined_features.shape}"
-        )
-
-        return combined_features, labels
+        return all_layers_embeddings
 
 
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
     """Factory function to create feature extractors."""
     extractors = {
         "dinov2": FeatureExtractor,
-        "swinv2": FeatureExtractor,
         "clip": FeatureExtractor,
+        "llava": LlavaFeatureExtractor,
     }
 
     if extractor_type not in extractors:

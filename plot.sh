@@ -1,6 +1,6 @@
 export PYTHONPATH=$(pwd)
 
 python scripts/plot_probes.py \
-    --results_dir results/08-04 \
-    --taxonomy_file dataset/mcrae-x-things-taxonomy.json \
-    --save plots/08-04
+    --results_dir results/week-33/clip-vit-large-patch14-336 \
+    --taxonomy_file dataset/mcrae-x-things-taxonomy-simp.json \
+    --save plots/week-33/clip-vit-large-patch14-336

@@ -352,6 +352,227 @@ def overview_performance(results, metric="f1", save_path=None):
     return layer_data
 
 
+def attribute_breakdown(results, layer, taxonomy, metric="f1", save_path=None):
+    """
+    Plot individual attributes as bars, color-coded by category.
+    Shows both individual performance and category grouping in one visualization.
+    """
+    if layer not in results:
+        print(f"Layer {layer} not found in results")
+        return
+
+    # Get all attribute scores for this layer
+    individual_results = results[layer]["individual_results"]
+
+    # Create list of (attribute, score, baseline, category) tuples
+    attr_data = []
+    for result in individual_results:
+        attr = result["attribute"]
+        score = result[f"mean_{metric}"]
+        baseline = result[f"baseline_mean_{metric}"]
+        category = taxonomy.get(attr, "unknown")
+        attr_data.append((attr, score, baseline, category))
+
+    # Group by category and sort within each category by score descending
+    category_groups = {}
+    for attr, score, baseline, category in attr_data:
+        if category not in category_groups:
+            category_groups[category] = []
+        category_groups[category].append((attr, score, baseline))
+
+    # Sort categories by their mean performance (best categories first)
+    category_means = {
+        cat: np.mean([score for _, score, _ in attrs])
+        for cat, attrs in category_groups.items()
+    }
+    sorted_categories = sorted(category_means.items(), key=lambda x: x[1], reverse=True)
+    category_order = [cat for cat, _ in sorted_categories]
+
+    # Sort attributes within each category by score (best first)
+    for cat in category_groups:
+        category_groups[cat].sort(key=lambda x: x[1], reverse=True)
+
+    # Flatten data in category-grouped order with spacing
+    attributes = []
+    scores = []
+    baselines = []
+    categories = []
+    x_positions = []  # Custom x positions with spacing
+    category_positions = {}  # Track where each category starts for visual separators
+
+    current_pos = 0
+    bar_spacing = 2  # Space between bars (1.0 = no extra space, >1.0 = more space)
+
+    for cat in category_order:
+        category_positions[cat] = current_pos
+        for attr, score, baseline in category_groups[cat]:
+            attributes.append(attr)
+            scores.append(score)
+            baselines.append(baseline)
+            categories.append(cat)
+            x_positions.append(current_pos)
+            current_pos += bar_spacing
+
+    # Get unique categories and assign colors
+    unique_categories = category_order
+    category_colors = dict(
+        zip(unique_categories, plt.cm.Set3(np.linspace(0, 1, len(unique_categories))))
+    )
+
+    # Assign colors to each bar based on category
+    bar_colors = [category_colors[cat] for cat in categories]
+
+    # Create the plot
+    plt.figure(figsize=(18, 8))  # Wider figure for better spacing
+
+    # Create bars with custom spacing
+    bars = plt.bar(
+        x_positions,
+        scores,
+        color=bar_colors,
+        alpha=0.7,
+        edgecolor="black",
+        linewidth=0.5,
+        width=1.2,  # Bar width
+    )
+
+    # Add baseline markers
+    for i, baseline in enumerate(baselines):
+        x_pos = x_positions[i]
+        plt.plot(
+            [x_pos - 0.4, x_pos + 0.4],
+            [baseline, baseline],
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.8,
+        )
+
+    # Add vertical separators between categories
+    y_max = max(scores) * 1.1
+    for i, cat in enumerate(category_order[:-1]):  # Skip last category
+        # Find the end of this category using actual x positions
+        cat_start = category_positions[cat]
+        cat_size = len(category_groups[cat])
+        last_bar_in_cat = cat_start + (cat_size - 1) * bar_spacing
+        separator_pos = last_bar_in_cat + bar_spacing / 2
+        plt.axvline(
+            x=separator_pos, color="gray", linestyle="-", linewidth=2, alpha=0.6
+        )
+
+    # Add category labels at the top
+    for cat in category_order:
+        cat_start = category_positions[cat]
+        cat_size = len(category_groups[cat])
+        start_x = cat_start
+        end_x = cat_start + (cat_size - 1) * bar_spacing
+        center_pos = (start_x + end_x) / 2
+        plt.text(
+            center_pos,
+            y_max * 0.95,
+            cat,
+            ha="center",
+            va="center",
+            fontweight="bold",
+            fontsize=10,
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor=category_colors[cat],
+                alpha=0.3,
+                edgecolor="black",
+            ),
+        )
+
+    # Formatting
+    plt.xlabel("Attributes (grouped by category)", fontsize=12)
+    plt.ylabel(f"{metric.upper()} Score", fontsize=12)
+    plt.title(
+        f"Individual Attribute Performance (Layer {layer}) - Grouped by Category",
+        fontsize=14,
+    )
+    plt.grid(True, alpha=0.3, axis="y")
+
+    # Adjust y-axis to accommodate category labels
+    plt.ylim(0, y_max)
+
+    # Rotate x-axis labels for readability with better spacing
+    plt.xticks(x_positions, attributes, rotation=90, ha="right", fontsize=9)
+
+    # Create legend for categories
+    legend_elements = [
+        plt.Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor=category_colors[cat],
+            alpha=0.7,
+            edgecolor="black",
+            label=cat,
+        )
+        for cat in unique_categories
+    ]
+    plt.legend(
+        handles=legend_elements, bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=10
+    )
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"Saved plot to: {save_path}")
+
+    plt.show()
+
+    # Print summary by category
+    print(f"\nAttribute Performance Summary for Layer {layer}:")
+    print("=" * 60)
+
+    category_stats = {}
+    for cat in unique_categories:
+        cat_scores = [
+            score for attr, score, _, category in attr_data if category == cat
+        ]
+        cat_baselines = [
+            baseline for attr, _, baseline, category in attr_data if category == cat
+        ]
+        category_stats[cat] = {
+            "count": len(cat_scores),
+            "mean_score": np.mean(cat_scores),
+            "std_score": np.std(cat_scores),
+            "mean_baseline": np.mean(cat_baselines),
+            "best_attr": max(
+                [
+                    (attr, score)
+                    for attr, score, _, category in attr_data
+                    if category == cat
+                ],
+                key=lambda x: x[1],
+            ),
+            "worst_attr": min(
+                [
+                    (attr, score)
+                    for attr, score, _, category in attr_data
+                    if category == cat
+                ],
+                key=lambda x: x[1],
+            ),
+        }
+
+    # Sort categories by mean performance
+    sorted_cats = sorted(
+        category_stats.items(), key=lambda x: x[1]["mean_score"], reverse=True
+    )
+
+    for cat, stats in sorted_cats:
+        print(f"\n{cat} (n={stats['count']}):")
+        print(f"  Mean: {stats['mean_score']:.3f} ± {stats['std_score']:.3f}")
+        print(f"  Baseline: {stats['mean_baseline']:.3f}")
+        print(f"  Best: {stats['best_attr'][0]} ({stats['best_attr'][1]:.3f})")
+        print(f"  Worst: {stats['worst_attr'][0]} ({stats['worst_attr'][1]:.3f})")
+
+    return attr_data, category_stats
+
+
 def performance_curves(results, taxonomy, categories=None, metric="f1", save_path=None):
     """
     Plot multiple line plots, one per category, across layers.
@@ -584,6 +805,12 @@ def main():
                 11,
                 taxonomy,
                 save_path=f"{args.save}/category_breakdown_11.png",
+            )
+            attribute_breakdown(
+                results,
+                11,
+                taxonomy,
+                save_path=f"{args.save}/performance_curves.png",
             )
             performance_curves(
                 results,

@@ -1,5 +1,5 @@
 model:
-  type: clip
+  type: llava
   model_name: llava-1.5-7b-hf
   model_path: /home/bzq999/data/compmech/models/llava-1.5-7b-hf/
   batch_size: 32
@@ -16,7 +16,7 @@ probe:
   n_repeats: 2
   output_dir: results/
   seed: 42
-  specific_attribute: ['a_bird']
+  specific_attribute:
 
 dataset:
   path: /home/bzq999/data/compmech/mcrae-x-things.hf/

@@ -1,7 +1,7 @@
 model:
   type: clip
   model_name: clip-vit-large-patch14-336
-  model_path: /home/bzq999/data/compmech/models/clip-vit-large-patch14-336/
+  model_path: /home/bzq999/data/compmech/models/clip-vit-large-patch14-336/ 
   batch_size: 32
   device: auto
   features_dir: /home/bzq999/data/compmech/features
