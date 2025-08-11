@@ -34,10 +34,6 @@ class BaseFeatureExtractor(ABC):
         """Extract features from dataset."""
         pass
 
-    @abstractmethod
-    def _preprocess_image_batch(examples, processor):
-        pass
-
     def load_layer_features(
         self,
         dataset: Dataset,
@@ -286,7 +282,10 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
-    def _preprocess_image_batch(examples, processor):
+    def _preprocess_image_batch(
+        self,
+        examples,
+    ):
         """
         Loads images from paths and processes them using the given processor.
         This function is designed to be mapped over a HuggingFace Dataset.
@@ -295,7 +294,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         images = [Image.open(path).convert("RGB") for path in image_paths]
         text = [""] * len(images)
-        inputs = processor(images=images, text=text, return_tensors="pt")
+        inputs = self.processor(images=images, text=text, return_tensors="pt")
         result = {"image_path": image_paths}
         for key, value in inputs.items():
             result[key] = value
@@ -316,11 +315,8 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        def bound_preprocess_function(examples):
-            return self._preprocess_image_batch(examples, self.processor)
-
         processed_dataset = dataset.map(
-            bound_preprocess_function,
+            self._preprocess_image_batch,
             batched=True,
             load_from_cache_file=True,
             desc="Preprocessing Images",
