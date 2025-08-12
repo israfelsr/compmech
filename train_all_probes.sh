@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=probe_all_layers
 #SBATCH --output=logs/probe_layers_%A_%a.out
-#SBATCH --array=0-13
+#SBATCH --array=0-24%5
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --time=10:00:00

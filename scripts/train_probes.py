@@ -17,7 +17,7 @@ from typing import List, Dict, Any
 # Add src to path to import modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 from src.models.feature_extractors import get_feature_extractor
-from src.models.probes import AttributeProbes
+from src.models.probes import AttributeProbes, load_layer_features
 
 
 def setup_logging():
@@ -86,16 +86,17 @@ def main():
 
     # Get layer features
     model_config = config["model"]
-    extractor = get_feature_extractor(
-        extractor_type=model_config["type"],
-        model_name=model_config["model_name"],
-        model_path=model_config["model_path"],
-        batch_size=model_config["batch_size"],
-        device=model_config["device"],
-    )
+    # extractor = get_feature_extractor(
+    #     extractor_type=model_config["type"],
+    #     model_name=model_config["model_name"],
+    #     model_path=model_config["model_path"],
+    #     batch_size=model_config["batch_size"],
+    #     device=model_config["device"],
+    # )
 
-    dataset = extractor.load_layer_features(
+    dataset = load_layer_features(
         dataset=dataset,
+        model_name=model_config["model_name"],
         layer=layer_idx,
         features_dir=model_config["features_dir"],
     )

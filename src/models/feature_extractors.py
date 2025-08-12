@@ -344,6 +344,10 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
                 for layer_idx, layer_hidden_state in enumerate(hidden_states):
                     layer_name = f"layer_{layer_idx}"
+
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
+
                     # Apply global average pooling
                     patch_features = layer_hidden_state[:, 1:, :]  # Remove CLS token
                     pooled_features = (

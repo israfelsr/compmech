@@ -9,6 +9,54 @@ from tqdm import tqdm
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
+from datasets import Dataset
+from pathlib import Path
+
+
+def load_layer_features(
+    dataset: Dataset,
+    model_name: str,
+    layer: str,
+    features_dir: str = "/home/bzq999/data/compmech/features/",
+):
+    if isinstance(layer, list):
+        layer = layer[0]
+
+    model_features_dir = Path(features_dir) / model_name
+    if not model_features_dir.exists():
+        raise FileNotFoundError(
+            f"Features directory does not exist: {model_features_dir}"
+        )
+    feature_dataset_path = model_features_dir / f"layer_{layer}.pt"
+    logging.info(f"Loading cached features for layer {layer}")
+    cached_layers_features = {}
+    try:
+        cached_layers_features[layer] = torch.load(
+            feature_dataset_path, weights_only=False
+        )
+        logging.info(
+            f"Loaded {len(cached_layers_features[layer])} cached features for layer {layer}"
+        )
+    except Exception as e:
+        logging.warning(f"Failed to load cached features for layer {layer}: {e}")
+
+    merged_dataset = dataset
+    features = cached_layers_features[layer]
+    feature_column_name = f"layer_{layer}"
+    feature_values = []
+
+    for sample in dataset:
+        image_path = sample["image_path"]
+        if image_path in features:
+            feature_values.append(features[image_path].tolist())
+        else:
+            logging.warning(f"No features found for {image_path}, using zero vector")
+            feature_dim = len(list(features.values())[0]) if features else 768
+            feature_values.append(np.zeros(feature_dim).tolist())
+
+    merged_dataset = merged_dataset.add_column(feature_column_name, feature_values)
+
+    return merged_dataset
 
 
 class AttributeProbes:
