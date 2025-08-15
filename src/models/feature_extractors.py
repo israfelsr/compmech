@@ -138,7 +138,7 @@ class FeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
-    def _preprocess_image_batch(examples, processor):
+    def _preprocess_image_batch(self, examples):
         """
         Loads images from paths and processes them using the given processor.
         This function is designed to be mapped over a HuggingFace Dataset.
@@ -147,7 +147,9 @@ class FeatureExtractor(BaseFeatureExtractor):
 
         images = [Image.open(path).convert("RGB") for path in image_paths]
 
-        pixel_values = processor(images=images, return_tensors="pt")["pixel_values"]
+        pixel_values = self.processor(images=images, return_tensors="pt")[
+            "pixel_values"
+        ]
         return {
             "image_path": image_paths,
             "pixel_values": pixel_values,
@@ -168,11 +170,8 @@ class FeatureExtractor(BaseFeatureExtractor):
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        def bound_preprocess_function(examples):
-            return self._preprocess_image_batch(examples, self.processor)
-
         processed_dataset = dataset.map(
-            bound_preprocess_function,
+            self._preprocess_image_batch,
             batched=True,
             load_from_cache_file=True,
             desc="Preprocessing Images",
@@ -229,11 +228,7 @@ class FeatureExtractor(BaseFeatureExtractor):
 
                 if self.projection:
                     projection = getattr(self.model, self.projection)
-                    norm_tensor = last_hidden_state.norm(p=2, dim=-1, keepdim=True)
-                    last_hidden_state = last_hidden_state / norm_tensor
-                    cls_token_features = (
-                        projection(last_hidden_state)[:, 0, :].cpu().numpy()
-                    )
+                    cls_token_features = projection(outputs.pooler_output).cpu().numpy()
 
                     if "projection" not in all_layers_embeddings:
                         all_layers_embeddings["projection"] = {}
@@ -276,7 +271,10 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         self.vision_tower = tower_name
         self.projection = projection_name
 
-        self.model = attrgetter(self.vision_tower)(model).to(self.device)
+        if self.vision_tower:
+            self.model = attrgetter(self.vision_tower)(model).to(self.device)
+        else:
+            self.model = model.to(self.device)
         self.projection = attrgetter(self.projection)(model).to(self.device)
         del model
 
@@ -384,6 +382,33 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
                         all_layers_embeddings["projection"][path] = pooled_features[i]
 
         return all_layers_embeddings
+
+    def extract_language_features(self, dataset):
+        all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
+
+        processed_dataset = dataset.map(
+            self._preprocess_image_batch,
+            batched=True,
+            load_from_cache_file=True,
+            desc="Preprocessing Images",
+        )
+        processed_dataset.set_format(
+            type="torch", columns=["pixel_values", "image_path"]
+        )
+
+        dataloader = DataLoader(
+            processed_dataset, batch_size=self.batch_size, shuffle=False
+        )
+        with torch.no_grad():
+            for batch in tqdm(
+                dataloader, desc="Extracting All Layer Features", unit="batch"
+            ):
+                batch_image_paths: List[str] = [
+                    p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
+                ]
+                pixel_values = batch["pixel_values"].to(self.device)
+                inputs_ids = batch["input_ids"]
+                outputs = self.model(**inputs, output_hidden_states=True)
 
 
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:

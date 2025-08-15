@@ -6,7 +6,6 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --time=01:00:00              # Set a maximum runtime of 10 minutes (HH:MM:SS)
-
 #SBATCH --partition=cpu
 
 export PYTHONPATH=$(pwd)
