@@ -137,6 +137,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         self.projection = projection_name
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
+        self.prompt = "USER: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
 
     def _preprocess_image_batch(self, examples):
         """
@@ -384,6 +385,9 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         return all_layers_embeddings
 
     def extract_language_features(self, dataset):
+        logging.info(f"Extracting features from all layers of {self.model_name}...")
+
+        # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
         processed_dataset = dataset.map(
@@ -393,22 +397,54 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
             desc="Preprocessing Images",
         )
         processed_dataset.set_format(
-            type="torch", columns=["pixel_values", "image_path"]
+            type="torch",
+            columns=["pixel_values", "image_path", "input_ids", "attention_mask"],
         )
 
         dataloader = DataLoader(
             processed_dataset, batch_size=self.batch_size, shuffle=False
         )
+
         with torch.no_grad():
             for batch in tqdm(
-                dataloader, desc="Extracting All Layer Features", unit="batch"
+                dataloader, desc="Extracting Language Features", unit="batch"
             ):
+                # Prepare inputs for the model
+                inputs = {
+                    "pixel_values": batch["pixel_values"].to(self.device),
+                    "input_ids": batch["input_ids"].to(self.device),
+                    "attention_mask": batch["attention_mask"].to(self.device),
+                }
                 batch_image_paths: List[str] = [
                     p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
                 ]
-                pixel_values = batch["pixel_values"].to(self.device)
-                inputs_ids = batch["input_ids"]
+
+                # Get language model outputs
                 outputs = self.model(**inputs, output_hidden_states=True)
+                # Extract features from all hidden states of the language model
+                hidden_states = outputs.hidden_states  # List of tensors for each layer
+                for layer_idx, layer_hidden_state in enumerate(hidden_states):
+                    layer_name = f"lang_layer_{layer_idx}"
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
+                    sequence_features = layer_hidden_state.mean(dim=1).cpu().nupmy()
+                    # Store features for each image path
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = sequence_features[i]
+
+                    # Handle last hidden state if different from final lay
+                    last_hidden_state = outputs.last_hidden_state
+                    if not torch.equal(last_hidden_state, outputs.hidden_states[-1]):
+                        last_layer_name = "lang_layer_last"
+                        sequence_features = last_hidden_state.mean(dim=1).cpu().numpy()
+                        if last_layer_name not in all_layers_embeddings:
+                            all_layers_embeddings[last_layer_name] = {}
+                        for i, path in enumerate(batch_image_paths):
+                            all_layers_embeddings[last_layer_name][path] = (
+                                sequence_features[i]
+                            )
+
+        return all_layers_embeddings
 
 
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
