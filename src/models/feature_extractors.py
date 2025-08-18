@@ -86,6 +86,7 @@ class BaseFeatureExtractor(ABC):
         self,
         dataset: Dataset,
         features_dir: str = "/home/bzq999/data/compmech/features/",
+        language_model: str = None,
     ):
         logging.info(
             f"Extracting features from all layers for {len(dataset)} samples..."
@@ -112,6 +113,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         model_path="facebook/dinov2-base",
         batch_size=32,
         device="auto",
+        extract_language=False,
         tower_name=None,
         projection_name=None,
     ):
@@ -251,6 +253,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         model_path="llava-hf/llava-1.5-7b-hf",
         batch_size=32,
         device="auto",
+        extract_language=False,
         tower_name=None,
         projection_name=None,
     ):
@@ -276,8 +279,12 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
             self.model = attrgetter(self.vision_tower)(model).to(self.device)
         else:
             self.model = model.to(self.device)
-        self.projection = attrgetter(self.projection)(model).to(self.device)
+        if self.projection:
+            self.projection = attrgetter(self.projection)(model).to(self.device)
         del model
+
+        if extract_language:
+            self.extract_features = self.extract_language_features
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
@@ -427,7 +434,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
                     layer_name = f"lang_layer_{layer_idx}"
                     if layer_name not in all_layers_embeddings:
                         all_layers_embeddings[layer_name] = {}
-                    sequence_features = layer_hidden_state.mean(dim=1).cpu().nupmy()
+                    sequence_features = layer_hidden_state.mean(dim=1).cpu().numpy()
                     # Store features for each image path
                     for i, path in enumerate(batch_image_paths):
                         all_layers_embeddings[layer_name][path] = sequence_features[i]

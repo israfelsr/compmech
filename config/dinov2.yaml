@@ -5,6 +5,7 @@ model:
   batch_size: 32
   device: auto
   features_dir: /home/bzq999/data/compmech/features
+  extract_language: False
   tower_name:
   projection:
 

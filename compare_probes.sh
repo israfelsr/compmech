@@ -13,4 +13,3 @@ python scripts/compare_probes.py \
     --flipping-analysis \
     --detailed-layer proj \
     --taxonomy dataset/mcrae-x-things-taxonomy-simp.json
-    --metric f1
