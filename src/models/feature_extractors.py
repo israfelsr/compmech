@@ -306,7 +306,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
             result[key] = value
         return result
 
-    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
+    def extract_features(self, processed_dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract features from all layers of the dataset using DINOv2.
 
@@ -321,12 +321,6 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        processed_dataset = dataset.map(
-            self._preprocess_mm_batch,
-            batched=True,
-            load_from_cache_file=True,
-            desc="Preprocessing Images",
-        )
         processed_dataset.set_format(
             type="torch", columns=["pixel_values", "image_path"]
         )
@@ -391,18 +385,12 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         return all_layers_embeddings
 
-    def extract_language_features(self, dataset):
+    def extract_language_features(self, processed_dataset):
         logging.info(f"Extracting features from all layers of {self.model_name}...")
 
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        processed_dataset = dataset.map(
-            self._preprocess_mm_batch,
-            batched=True,
-            load_from_cache_file=True,
-            desc="Preprocessing Images",
-        )
         processed_dataset.set_format(
             type="torch",
             columns=["pixel_values", "image_path", "input_ids", "attention_mask"],

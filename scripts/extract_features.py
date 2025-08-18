@@ -11,6 +11,8 @@ from pathlib import Path
 from datasets import load_from_disk
 import sys
 import os
+from PIL import Image
+from transformers import AutoProcessor
 
 # Add src to path to import feature extractors
 sys.path.append(str(Path(__file__).parent.parent / "src"))
@@ -68,6 +70,33 @@ def main():
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
+    processor = AutoProcessor.from_pretrained(model_config["model_path"])
+
+    def _preprocess_mm_batch(
+        self,
+        examples,
+    ):
+        """
+        Loads images from paths and processes them using the given processor.
+        This function is designed to be mapped over a HuggingFace Dataset.
+        """
+        image_paths = examples["image_path"]
+
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+        text = ["<image>"] * len(images)
+        inputs = processor(images=images, text=text, return_tensors="pt")
+        result = {"image_path": image_paths}
+        for key, value in inputs.items():
+            result[key] = value
+        return result
+
+    processed_dataset = dataset.map(
+        extractor._preprocess_mm_batch,
+        batched=True,
+        load_from_cache_file=True,
+        desc="Preprocessing Images",
+    )
+
     # Initialize feature extractor
     model_config = config["model"]
     extractor = get_feature_extractor(
@@ -85,7 +114,7 @@ def main():
 
     # Extract features and add to dataset
     dataset_with_features = extractor.extract_and_save(
-        dataset=dataset,
+        dataset=processed_dataset,
         features_dir=model_config["features_dir"],
     )
 
