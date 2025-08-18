@@ -6,7 +6,7 @@ from transformers import (
     AutoImageProcessor,
     AutoModel,
     AutoProcessor,
-    AutoModelForVision2Seq,
+    AutoModelForImageTextToText,
 )
 from tqdm import tqdm
 import logging
@@ -268,7 +268,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         # Load model and processor
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
-        model = AutoModelForVision2Seq.from_pretrained(model_path)
+        model = AutoModelForImageTextToText.from_pretrained(model_path)
         self.vision_tower = tower_name
         self.projection = projection_name
 
@@ -281,7 +281,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded model from {model_path} on {self.device}")
 
-    def _preprocess_image_batch(
+    def _preprocess_mm_batch(
         self,
         examples,
     ):
@@ -292,7 +292,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         image_paths = examples["image_path"]
 
         images = [Image.open(path).convert("RGB") for path in image_paths]
-        text = [""] * len(images)
+        text = ["<image>"] * len(images)
         inputs = self.processor(images=images, text=text, return_tensors="pt")
         result = {"image_path": image_paths}
         for key, value in inputs.items():
@@ -315,7 +315,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
         processed_dataset = dataset.map(
-            self._preprocess_image_batch,
+            self._preprocess_mm_batch,
             batched=True,
             load_from_cache_file=True,
             desc="Preprocessing Images",
@@ -391,7 +391,7 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
         processed_dataset = dataset.map(
-            self._preprocess_image_batch,
+            self._preprocess_mm_batch,
             batched=True,
             load_from_cache_file=True,
             desc="Preprocessing Images",
