@@ -69,11 +69,11 @@ def main():
     # Load dataset
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
+    model_config = config["model"]
 
-    processor = AutoProcessor.from_pretrained(model_config["model_path"])
+    processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
 
     def _preprocess_mm_batch(
-        self,
         examples,
     ):
         """
@@ -91,14 +91,13 @@ def main():
         return result
 
     processed_dataset = dataset.map(
-        extractor._preprocess_mm_batch,
+        _preprocess_mm_batch,
         batched=True,
         load_from_cache_file=True,
         desc="Preprocessing Images",
     )
 
     # Initialize feature extractor
-    model_config = config["model"]
     extractor = get_feature_extractor(
         extractor_type=model_config["type"],
         model_name=model_config["model_name"],
