@@ -427,18 +427,6 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
                     for i, path in enumerate(batch_image_paths):
                         all_layers_embeddings[layer_name][path] = sequence_features[i]
 
-                    # Handle last hidden state if different from final lay
-                    last_hidden_state = outputs.last_hidden_state
-                    if not torch.equal(last_hidden_state, outputs.hidden_states[-1]):
-                        last_layer_name = "lang_layer_last"
-                        sequence_features = last_hidden_state.mean(dim=1).cpu().numpy()
-                        if last_layer_name not in all_layers_embeddings:
-                            all_layers_embeddings[last_layer_name] = {}
-                        for i, path in enumerate(batch_image_paths):
-                            all_layers_embeddings[last_layer_name][path] = (
-                                sequence_features[i]
-                            )
-
         return all_layers_embeddings
 
 

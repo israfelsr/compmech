@@ -47,7 +47,7 @@ def main(args):
         torch_dtype=torch.float16,
         device_map=model_config["device"],
     )
-    processor = AutoProcessor.from_pretrained(model_config["model_path"])
+    processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
 
     # Create prompt templates
     prompt_templates = {
