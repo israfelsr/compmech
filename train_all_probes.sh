@@ -11,8 +11,8 @@ mkdir -p logs
 
 # Define the layers to process (0-12 + last)
 #layers=("last" 0 1 2 3 4 5 6 7 8 9 10 11 12)
-layers=("proj" 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24)
-
+n=32
+layers=($(seq 0 $n))
 
 # Get the current layer from the array index
 current_layer=${layers[$SLURM_ARRAY_TASK_ID]}

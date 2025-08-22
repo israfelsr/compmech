@@ -22,10 +22,6 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def get_all_attributes_from_dataset(dataset):
-    """Extract all unique attributes from the dataset."""
-
-
 def main(args):
     # Load configuration
     config = load_config(args.config)
@@ -40,6 +36,59 @@ def main(args):
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
+    # Processing
+    processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
+
+    # Create prompt templates
+    prompt_template = "USER: Image: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
+
+    # Get attribute(s) from config or args
+    specific_attribute = args.attribute or config["probe"].get("specific_attribute")
+
+    if specific_attribute:
+        # Single attribute mode
+        attributes_to_process = specific_attribute
+        logging.info(f"Processing single attribute: {specific_attribute}")
+    else:
+        # All attributes mode
+        attributes_to_process = list(dataset[0].keys())[2:]
+        logging.info(f"Processing all {len(attributes_to_process)} attributes")
+
+    def preprocess_images(
+        examples,
+    ):
+        """
+        Loads images from paths and processes them using the given processor.
+        This function is designed to be mapped over a HuggingFace Dataset.
+        """
+        image_paths = examples["image_path"]
+
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+        text = ["<image>"] * len(images)
+        inputs = processor(images=images, text=text, return_tensors="pt")
+        result = {"image_path": image_paths}
+        for key, value in inputs.items():
+            result[key] = value
+        return result
+
+    image_dataset = dataset.map(
+        preprocess_images,
+        batched=True,
+        load_from_cache_file=True,
+        desc="Preprocessing Images",
+    )
+
+    def process_text(examples):
+        image = Image.open(dataset[0]["image_path"]).convert("RGB")
+        texts = [
+            prompt_template.format(attribute_name=attr)
+            for attr in attributes_to_process
+        ]
+        inputs = processor(images=image, text=texts, return_tensors="pt")
+        for key, value in inputs.items():
+            result[key] = value
+        return result
+
     # Load model and processor
     model_config = config["model"]
     model = AutoModelForImageTextToText.from_pretrained(
@@ -47,24 +96,6 @@ def main(args):
         torch_dtype=torch.float16,
         device_map=model_config["device"],
     )
-    processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
-
-    # Create prompt templates
-    prompt_templates = {
-        "default": "USER: Image: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
-    }
-
-    # Get attribute(s) from config or args
-    specific_attribute = args.attribute or config["probe"].get("specific_attribute")
-
-    if specific_attribute:
-        # Single attribute mode
-        attributes_to_process = [specific_attribute]
-        logging.info(f"Processing single attribute: {specific_attribute}")
-    else:
-        # All attributes mode
-        attributes_to_process = list(dataset[0].keys())[2:]
-        logging.info(f"Processing all {len(attributes_to_process)} attributes")
 
     def process_sample_for_attribute(sample, attribute_name):
         """Process a single sample with image and prompt for a specific attribute."""
@@ -74,9 +105,6 @@ def main(args):
         image = Image.open(image_path).convert("RGB")
 
         # Create prompt based on attribute
-        prompt_template = prompt_templates.get(
-            args.prompt_type, prompt_templates["default"]
-        )
         prompt = prompt_template.format(attribute_name=attribute_name)
 
         # Process inputs
@@ -98,6 +126,7 @@ def main(args):
             "attribute": attribute_name,
             "prompt": prompt,
             "response": response.strip(),
+            "label": sample[attribute_name],
         }
 
     # Process all samples for each attribute
@@ -106,6 +135,12 @@ def main(args):
     logging.info(
         f"Processing {total_combinations} combinations ({len(dataset)} samples × {len(attributes_to_process)} attributes)..."
     )
+
+    prompts = [
+        prompt_template.format(attribute_name=attr) for attr in attributes_to_process
+    ]
+
+    processed_dataset = dataset.map
 
     for attribute_name in attributes_to_process:
         logging.info(f"Processing attribute: {attribute_name}")
