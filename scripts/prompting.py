@@ -37,6 +37,7 @@ def main(args):
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
     # Processing
+    model_config = config["model"]
     processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
 
     # Create prompt templates
@@ -53,6 +54,17 @@ def main(args):
         # All attributes mode
         attributes_to_process = list(dataset[0].keys())[2:]
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
+
+    def process_text(examples):
+        image = Image.open(dataset[0]["image_path"]).convert("RGB")
+        texts = [
+            prompt_template.format(attribute_name=attr)
+            for attr in attributes_to_process
+        ]
+        inputs = processor(images=image, text=texts, return_tensors="pt")
+        for key, value in inputs.items():
+            result[key] = value
+        return result
 
     def preprocess_images(
         examples,
@@ -78,19 +90,7 @@ def main(args):
         desc="Preprocessing Images",
     )
 
-    def process_text(examples):
-        image = Image.open(dataset[0]["image_path"]).convert("RGB")
-        texts = [
-            prompt_template.format(attribute_name=attr)
-            for attr in attributes_to_process
-        ]
-        inputs = processor(images=image, text=texts, return_tensors="pt")
-        for key, value in inputs.items():
-            result[key] = value
-        return result
-
     # Load model and processor
-    model_config = config["model"]
     model = AutoModelForImageTextToText.from_pretrained(
         model_config["model_path"],
         torch_dtype=torch.float16,
