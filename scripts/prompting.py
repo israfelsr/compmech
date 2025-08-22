@@ -55,16 +55,19 @@ def main(args):
         attributes_to_process = list(dataset[0].keys())[2:]
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
 
-    def process_text(examples):
+    def process_text():
         image = Image.open(dataset[0]["image_path"]).convert("RGB")
         texts = [
             prompt_template.format(attribute_name=attr)
             for attr in attributes_to_process
         ]
-        inputs = processor(images=image, text=texts, return_tensors="pt")
+        inputs = processor(images=image, text=texts, return_tensors="pt", padding=True)
+        result = {}
         for key, value in inputs.items():
             result[key] = value
         return result
+
+    prompts = process_text()
 
     def preprocess_images(
         examples,
@@ -97,37 +100,98 @@ def main(args):
         device_map=model_config["device"],
     )
 
-    def process_sample_for_attribute(sample, attribute_name):
-        """Process a single sample with image and prompt for a specific attribute."""
-        image_path = sample["image_path"]
+    def process_samples_for_attribute(attr_idx):
+        """Process all samples for a specific attribute using batched inference."""
+        batch_size = model_config.get("batch_size", 16)
+        results = []
 
-        # Load image
-        image = Image.open(image_path).convert("RGB")
+        # Use DataLoader for proper batching
+        from torch.utils.data import DataLoader
 
-        # Create prompt based on attribute
-        prompt = prompt_template.format(attribute_name=attribute_name)
+        def collate_fn(batch):
+            # batch is a list of dataset items
+            pixel_values = torch.stack([item["pixel_values"] for item in batch])
+            image_paths = [item["image_path"] for item in batch]
+            return {"pixel_values": pixel_values, "image_path": image_paths}
 
-        # Process inputs
-        inputs = processor(images=image, text=prompt, return_tensors="pt", padding=True)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        dataloader = DataLoader(
+            image_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+        )
 
-        # Generate response
-        with torch.no_grad():
-            generated_ids = model.generate(
-                **inputs, max_new_tokens=100, do_sample=False
-            )
-            response = processor.batch_decode(
-                generated_ids[:, inputs["input_ids"].shape[1] :],
-                skip_special_tokens=True,
-            )[0]
+        attribute_name = attributes_to_process[attr_idx]
 
-        return {
-            "image_path": image_path,
-            "attribute": attribute_name,
-            "prompt": prompt,
-            "response": response.strip(),
-            "label": sample[attribute_name],
+        # Get the text inputs for this attribute (same for all images)
+        text_inputs = {
+            "input_ids": prompts["input_ids"][
+                attr_idx : attr_idx + 1
+            ],  # Shape: [1, seq_len]
+            "attention_mask": prompts["attention_mask"][
+                attr_idx : attr_idx + 1
+            ],  # Shape: [1, seq_len]
         }
+
+        for batch in tqdm(dataloader, desc=f"Processing {attribute_name} batches"):
+            batch_pixel_values = batch["pixel_values"].to(device)  # [batch_size, ...]
+            batch_image_paths = batch["image_path"]
+
+            # Repeat text inputs for batch size
+            batch_size_actual = batch_pixel_values.shape[0]
+            batch_input_ids = (
+                text_inputs["input_ids"].repeat(batch_size_actual, 1).to(device)
+            )
+            batch_attention_mask = (
+                text_inputs["attention_mask"].repeat(batch_size_actual, 1).to(device)
+            )
+
+            model_inputs = {
+                "pixel_values": batch_pixel_values,
+                "input_ids": batch_input_ids,
+                "attention_mask": batch_attention_mask,
+            }
+
+            # Generate responses
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    **model_inputs,
+                    max_new_tokens=100,
+                    do_sample=False,
+                    pad_token_id=processor.tokenizer.eos_token_id,
+                )
+
+                # Decode responses
+                responses = processor.batch_decode(
+                    generated_ids[:, model_inputs["input_ids"].shape[1] :],
+                    skip_special_tokens=True,
+                )
+
+            # Collect results for this batch
+            for i, (image_path, response) in enumerate(
+                zip(batch_image_paths, responses)
+            ):
+                # Find original sample to get label
+                original_sample = None
+                for sample in dataset:
+                    if sample["image_path"] == image_path:
+                        original_sample = sample
+                        break
+
+                results.append(
+                    {
+                        "image_path": image_path,
+                        "attribute": attribute_name,
+                        "prompt": processor.decode(
+                            prompts["input_ids"][attr_idx], skip_special_tokens=True
+                        ),
+                        "response": response.strip(),
+                        "label": (
+                            original_sample.get(attribute_name, None)
+                            if original_sample
+                            else None
+                        ),
+                    }
+                )
+
+        return results
 
     # Process all samples for each attribute
     all_results = {}
@@ -136,28 +200,21 @@ def main(args):
         f"Processing {total_combinations} combinations ({len(dataset)} samples × {len(attributes_to_process)} attributes)..."
     )
 
-    prompts = [
-        prompt_template.format(attribute_name=attr) for attr in attributes_to_process
-    ]
+    for attr_idx, attribute_name in enumerate(attributes_to_process):
+        logging.info(
+            f"Processing attribute {attr_idx+1}/{len(attributes_to_process)}: {attribute_name}"
+        )
 
-    processed_dataset = dataset.map
-
-    for attribute_name in attributes_to_process:
-        logging.info(f"Processing attribute: {attribute_name}")
-        results = []
-
-        for sample in tqdm(dataset, desc=f"Processing {attribute_name}"):
-            try:
-                result = process_sample_for_attribute(sample, attribute_name)
-                results.append(result)
-            except Exception as e:
-                logging.error(
-                    f"Error processing {sample.get('image_path', 'unknown')} for {attribute_name}: {e}"
-                )
-                continue
-
-        all_results[attribute_name] = results
-        logging.info(f"Completed {attribute_name}: {len(results)} samples processed")
+        try:
+            results = process_samples_for_attribute(attr_idx)
+            all_results[attribute_name] = results
+            logging.info(
+                f"Completed {attribute_name}: {len(results)} samples processed"
+            )
+        except Exception as e:
+            logging.error(f"Error processing attribute {attribute_name}: {e}")
+            all_results[attribute_name] = []  # Empty results for failed attribute
+            continue
 
     # Save results
     output_dir = Path(
