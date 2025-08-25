@@ -90,28 +90,25 @@ def load_checkpoint(checkpoint_path: str) -> dict:
         with open(checkpoint_path, "r") as f:
             checkpoint = json.load(f)
         logging.info(f"Loaded {len(checkpoint.get('results', []))} processed items from checkpoint")
+        logging.info(f"Last completed sample: {checkpoint.get('last_completed_sample', -1)}")
         return checkpoint
     else:
         logging.info("No checkpoint found, starting from beginning")
-        return {"results": [], "processed_combinations": set()}
+        return {"results": [], "last_completed_sample": -1}
 
 
-def save_checkpoint(checkpoint_path: str, results: list, processed_combinations: set):
+def save_checkpoint(checkpoint_path: str, results: list, last_completed_sample: int):
     """Save current progress to checkpoint file."""
     checkpoint = {
         "results": results,
-        "processed_combinations": list(processed_combinations),
+        "last_completed_sample": last_completed_sample,
         "timestamp": str(torch.tensor(0).item()),  # Simple timestamp
-        "total_processed": len(results)
+        "total_processed": len(results),
+        "completed_samples": last_completed_sample + 1
     }
     with open(checkpoint_path, "w") as f:
         json.dump(checkpoint, f, indent=2, ensure_ascii=False)
-    logging.info(f"Checkpoint saved with {len(results)} processed items")
-
-
-def create_combination_key(sample_idx: int, attribute_name: str) -> str:
-    """Create a unique key for sample-attribute combination."""
-    return f"{sample_idx}_{attribute_name}"
+    logging.info(f"Checkpoint saved with {last_completed_sample + 1} completed samples ({len(results)} total results)")
 
 
 def main(args):
@@ -179,10 +176,11 @@ def main(args):
     # Load existing checkpoint
     checkpoint = load_checkpoint(checkpoint_path)
     all_results = checkpoint.get("results", [])
-    processed_combinations = set(checkpoint.get("processed_combinations", []))
+    last_completed_sample = checkpoint.get("last_completed_sample", -1)
     
     logging.info(f"Starting with {len(all_results)} already processed items")
-    logging.info(f"Will save checkpoint every 100 processed items to: {checkpoint_path}")
+    logging.info(f"Last completed sample index: {last_completed_sample}")
+    logging.info(f"Will save checkpoint every 100 completed samples to: {checkpoint_path}")
 
     # Initialize LlavaPrompting class
     batch_size = model_config.get("batch_size", 16)
@@ -199,30 +197,23 @@ def main(args):
     )
 
     # Process each sample with all its attributes
-    items_since_checkpoint = 0
+    samples_since_checkpoint = 0
     
     for sample_idx, sample in enumerate(tqdm(image_dataset, desc="Processing samples")):
-        logging.info(f"Processing sample {sample_idx+1}/{len(image_dataset)}")
-
-        # Check which attributes for this sample need processing
-        attributes_to_process_sample = []
-        for attribute_name in attributes_to_process:
-            combination_key = create_combination_key(sample_idx, attribute_name)
-            if combination_key not in processed_combinations:
-                attributes_to_process_sample.append(attribute_name)
-        
-        # Skip this sample if all attributes are already processed
-        if not attributes_to_process_sample:
-            logging.info(f"Sample {sample_idx} already fully processed, skipping")
+        # Skip samples that have already been completed
+        if sample_idx <= last_completed_sample:
+            logging.info(f"Sample {sample_idx} already processed, skipping")
             continue
+            
+        logging.info(f"Processing sample {sample_idx+1}/{len(image_dataset)}")
 
         # Prepare image data for this sample
         pixel_values = sample["pixel_values"]
 
-        # Create prompts only for unprocessed attributes
+        # Create prompts for all attributes for this sample
         texts = [
             prompt_template.format(attribute_name=attr)
-            for attr in attributes_to_process_sample
+            for attr in attributes_to_process
         ]
 
         # Process text prompts
@@ -237,15 +228,12 @@ def main(args):
             # Use LlavaPrompting class for inference
             responses = llava_model.inference(pixel_values, text_inputs)
 
-            # Process results for this sample
+            # Process results for this sample (all attributes)
             for attr_idx, (attribute_name, response) in enumerate(
-                zip(attributes_to_process_sample, responses)
+                zip(attributes_to_process, responses)
             ):
                 # Get original sample data for label
                 original_sample = dataset[sample_idx]
-                
-                combination_key = create_combination_key(sample_idx, attribute_name)
-                processed_combinations.add(combination_key)
 
                 all_results.append(
                     {
@@ -258,21 +246,11 @@ def main(args):
                         "label": original_sample.get(attribute_name, None),
                     }
                 )
-                
-                items_since_checkpoint += 1
-                
-                # Save checkpoint every 100 items
-                if items_since_checkpoint >= 100:
-                    save_checkpoint(checkpoint_path, all_results, processed_combinations)
-                    items_since_checkpoint = 0
 
         except Exception as e:
             logging.error(f"Error processing sample {sample_idx}: {e}")
-            # Add empty results for failed sample attributes that weren't processed yet
-            for attribute_name in attributes_to_process_sample:
-                combination_key = create_combination_key(sample_idx, attribute_name)
-                processed_combinations.add(combination_key)
-                
+            # Add empty results for failed sample (all attributes)
+            for attribute_name in attributes_to_process:
                 all_results.append(
                     {
                         "image_path": sample["image_path"],
@@ -282,17 +260,18 @@ def main(args):
                         "label": dataset[sample_idx].get(attribute_name, None),
                     }
                 )
-                
-                items_since_checkpoint += 1
-                
-                # Save checkpoint every 100 items (including errors)
-                if items_since_checkpoint >= 100:
-                    save_checkpoint(checkpoint_path, all_results, processed_combinations)
-                    items_since_checkpoint = 0
-            continue
+
+        # Mark this sample as completed and increment counter
+        last_completed_sample = sample_idx
+        samples_since_checkpoint += 1
+        
+        # Save checkpoint every 100 completed samples
+        if samples_since_checkpoint >= 100:
+            save_checkpoint(checkpoint_path, all_results, last_completed_sample)
+            samples_since_checkpoint = 0
 
     # Save final checkpoint
-    save_checkpoint(checkpoint_path, all_results, processed_combinations)
+    save_checkpoint(checkpoint_path, all_results, last_completed_sample)
     
     # Save final results
     output_dir = Path(
