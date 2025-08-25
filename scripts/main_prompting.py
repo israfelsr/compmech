@@ -28,6 +28,7 @@ class LlavaPrompting:
         self.processor = processor
 
     def inference(self, pixel_values, text):
+        responses = []
         with torch.no_grad():
             pixel_values = pixel_values[None].to(self.device)
             vision_feature_layer = self.model.config.vision_feature_layer
@@ -69,12 +70,14 @@ class LlavaPrompting:
                     max_new_tokens=100,
                     do_sample=False,
                 )
-                responses = self.processor.batch_decode(
-                    generated_ids,
-                    skip_special_tokens=True,
+                responses.extend(
+                    self.processor.batch_decode(
+                        generated_ids,
+                        skip_special_tokens=True,
+                    )
                 )
 
-                return responses
+            return responses
 
 
 def load_config(config_path: str) -> dict:
@@ -89,8 +92,12 @@ def load_checkpoint(checkpoint_path: str) -> dict:
         logging.info(f"Loading checkpoint from {checkpoint_path}")
         with open(checkpoint_path, "r") as f:
             checkpoint = json.load(f)
-        logging.info(f"Loaded {len(checkpoint.get('results', []))} processed items from checkpoint")
-        logging.info(f"Last completed sample: {checkpoint.get('last_completed_sample', -1)}")
+        logging.info(
+            f"Loaded {len(checkpoint.get('results', []))} processed items from checkpoint"
+        )
+        logging.info(
+            f"Last completed sample: {checkpoint.get('last_completed_sample', -1)}"
+        )
         return checkpoint
     else:
         logging.info("No checkpoint found, starting from beginning")
@@ -104,11 +111,13 @@ def save_checkpoint(checkpoint_path: str, results: list, last_completed_sample: 
         "last_completed_sample": last_completed_sample,
         "timestamp": str(torch.tensor(0).item()),  # Simple timestamp
         "total_processed": len(results),
-        "completed_samples": last_completed_sample + 1
+        "completed_samples": last_completed_sample + 1,
     }
     with open(checkpoint_path, "w") as f:
         json.dump(checkpoint, f, indent=2, ensure_ascii=False)
-    logging.info(f"Checkpoint saved with {last_completed_sample + 1} completed samples ({len(results)} total results)")
+    logging.info(
+        f"Checkpoint saved with {last_completed_sample + 1} completed samples ({len(results)} total results)"
+    )
 
 
 def main(args):
@@ -170,17 +179,19 @@ def main(args):
     # Initialize checkpoint system
     checkpoint_path = args.checkpoint_file or os.path.join(
         args.output_dir or config["probe"].get("output_dir", "results/main_prompting"),
-        "checkpoint.json"
+        "checkpoint.json",
     )
-    
+
     # Load existing checkpoint
     checkpoint = load_checkpoint(checkpoint_path)
     all_results = checkpoint.get("results", [])
     last_completed_sample = checkpoint.get("last_completed_sample", -1)
-    
+
     logging.info(f"Starting with {len(all_results)} already processed items")
     logging.info(f"Last completed sample index: {last_completed_sample}")
-    logging.info(f"Will save checkpoint every 100 completed samples to: {checkpoint_path}")
+    logging.info(
+        f"Will save checkpoint every 100 completed samples to: {checkpoint_path}"
+    )
 
     # Initialize LlavaPrompting class
     batch_size = model_config.get("batch_size", 16)
@@ -198,13 +209,13 @@ def main(args):
 
     # Process each sample with all its attributes
     samples_since_checkpoint = 0
-    
+
     for sample_idx, sample in enumerate(tqdm(image_dataset, desc="Processing samples")):
         # Skip samples that have already been completed
         if sample_idx <= last_completed_sample:
             logging.info(f"Sample {sample_idx} already processed, skipping")
             continue
-            
+
         logging.info(f"Processing sample {sample_idx+1}/{len(image_dataset)}")
 
         # Prepare image data for this sample
@@ -264,7 +275,7 @@ def main(args):
         # Mark this sample as completed and increment counter
         last_completed_sample = sample_idx
         samples_since_checkpoint += 1
-        
+
         # Save checkpoint every 100 completed samples
         if samples_since_checkpoint >= 100:
             save_checkpoint(checkpoint_path, all_results, last_completed_sample)
@@ -272,7 +283,7 @@ def main(args):
 
     # Save final checkpoint
     save_checkpoint(checkpoint_path, all_results, last_completed_sample)
-    
+
     # Save final results
     output_dir = Path(
         args.output_dir or config["probe"].get("output_dir", "results/main_prompting")
@@ -314,9 +325,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output-dir", type=str, help="Output directory for results")
     parser.add_argument(
-        "--checkpoint-file", 
-        type=str, 
-        help="Path to checkpoint file for resuming progress. If not specified, uses 'checkpoint.json' in output directory"
+        "--checkpoint-file",
+        type=str,
+        help="Path to checkpoint file for resuming progress. If not specified, uses 'checkpoint.json' in output directory",
     )
 
     args = parser.parse_args()
