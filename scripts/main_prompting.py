@@ -41,7 +41,7 @@ class LlavaPrompting:
                 vision_feature_select_strategy=vision_feature_select_strategy,
             )
 
-            for i in range(0, text.input_ids.shape[0], self.batch_size):
+            for i in tqdm(range(0, text.input_ids.shape[0], self.batch_size), desc="Processing attribute batches", leave=False):
                 input_ids = text["input_ids"][i : i + self.batch_size, :].to(
                     self.device
                 )
