@@ -27,9 +27,9 @@ class LlavaPrompting:
         self.batch_size = batch_size
         self.processor = processor
 
-    def inference(self, image, text):
+    def inference(self, pixel_values, text):
         with torch.no_grad():
-            pixel_values = image["pixel_values"].to(self.device)
+            pixel_values = pixel_values.to(self.device)
             vision_feature_layer = self.model.config.vision_feature_layer
             vision_feature_select_strategy = (
                 self.model.config.vision_feature_select_strategy
@@ -150,14 +150,17 @@ def main(args):
         processor=processor,
     )
 
+    image_dataset.set_format(
+        type="torch",
+        columns=["pixel_values", "image_path"],
+    )
+
     # Process each sample with all its attributes
     for sample_idx, sample in enumerate(tqdm(image_dataset, desc="Processing samples")):
         logging.info(f"Processing sample {sample_idx+1}/{len(image_dataset)}")
 
         # Prepare image data for this sample
-        image_data = {
-            "pixel_values": sample["pixel_values"].unsqueeze(0)  # Add batch dimension
-        }
+        pixel_values = sample["pixel_values"]
 
         # Create prompts for all attributes for this sample
         texts = [
@@ -167,8 +170,7 @@ def main(args):
 
         # Process text prompts
         text_inputs = processor(
-            images=[None]
-            * len(texts),  # Dummy images since we already have pixel_values
+            images=Image.open(dataset[0]["image_path"]).convert("RGB"),
             text=texts,
             return_tensors="pt",
             padding=True,
@@ -176,7 +178,7 @@ def main(args):
 
         try:
             # Use LlavaPrompting class for inference
-            responses = llava_model.inference(image_data, text_inputs)
+            responses = llava_model.inference(pixel_values, text_inputs)
 
             # Process results for this sample
             for attr_idx, (attribute_name, response) in enumerate(
