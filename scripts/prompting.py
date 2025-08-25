@@ -11,6 +11,9 @@ from tqdm import tqdm
 import sys
 import os
 
+# Disable tokenizers parallelism warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Add src to path to import utilities
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 from src.utils.logging_utils import setup_logging
@@ -91,6 +94,7 @@ def main(args):
         batched=True,
         load_from_cache_file=True,
         desc="Preprocessing Images",
+        num_proc=1,  # Disable multiprocessing to avoid tokenizer warnings
     )
 
     # Load model and processor
@@ -114,33 +118,32 @@ def main(args):
             image_paths = [item["image_path"] for item in batch]
             return {"pixel_values": pixel_values, "image_path": image_paths}
 
-        dataloader = DataLoader(
-            image_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+        image_dataset.set_format(
+            type="torch",
+            columns=["pixel_values", "image_path"],
         )
 
-        attribute_name = attributes_to_process[attr_idx]
-
-        # Get the text inputs for this attribute (same for all images)
-        text_inputs = {
-            "input_ids": prompts["input_ids"][
-                attr_idx : attr_idx + 1
-            ],  # Shape: [1, seq_len]
-            "attention_mask": prompts["attention_mask"][
-                attr_idx : attr_idx + 1
-            ],  # Shape: [1, seq_len]
-        }
+        dataloader = DataLoader(
+            image_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=0,  # Disable multiprocessing to avoid tokenizer warnings
+        )
 
         for batch in tqdm(dataloader, desc=f"Processing {attribute_name} batches"):
-            batch_pixel_values = batch["pixel_values"].to(device)  # [batch_size, ...]
+            batch_pixel_values = batch["pixel_values"].to(device)
             batch_image_paths = batch["image_path"]
 
             # Repeat text inputs for batch size
             batch_size_actual = batch_pixel_values.shape[0]
             batch_input_ids = (
-                text_inputs["input_ids"].repeat(batch_size_actual, 1).to(device)
+                prompts["input_ids"][attr_idx].repeat(batch_size_actual, 1).to(device)
             )
             batch_attention_mask = (
-                text_inputs["attention_mask"].repeat(batch_size_actual, 1).to(device)
+                prompts["attention_mask"][attr_idx]
+                .repeat(batch_size_actual, 1)
+                .to(device)
             )
 
             model_inputs = {
@@ -155,7 +158,6 @@ def main(args):
                     **model_inputs,
                     max_new_tokens=100,
                     do_sample=False,
-                    pad_token_id=processor.tokenizer.eos_token_id,
                 )
 
                 # Decode responses
