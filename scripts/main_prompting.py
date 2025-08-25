@@ -41,7 +41,11 @@ class LlavaPrompting:
                 vision_feature_select_strategy=vision_feature_select_strategy,
             )
 
-            for i in tqdm(range(0, text.input_ids.shape[0], self.batch_size), desc="Processing attribute batches", leave=False):
+            for i in tqdm(
+                range(0, text.input_ids.shape[0], self.batch_size),
+                desc="Processing attribute batches",
+                leave=False,
+            ):
                 input_ids = text["input_ids"][i : i + self.batch_size, :].to(
                     self.device
                 )
@@ -53,7 +57,7 @@ class LlavaPrompting:
                 inputs_embeds = self.model.model.get_input_embeddings()(input_ids)
                 image_features_batch = (
                     image_features[0]
-                    .repeat(self.batch_size, 1)
+                    .repeat(real_batch_size, 1)
                     .to(inputs_embeds.device, inputs_embeds.dtype)
                 )
                 special_image_mask = self.model.model.get_placeholder_mask(
@@ -277,7 +281,7 @@ def main(args):
         samples_since_checkpoint += 1
 
         # Save checkpoint every 100 completed samples
-        if samples_since_checkpoint >= 100:
+        if samples_since_checkpoint >= 1:
             save_checkpoint(checkpoint_path, all_results, last_completed_sample)
             samples_since_checkpoint = 0
 
