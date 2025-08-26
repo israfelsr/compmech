@@ -141,7 +141,7 @@ def main(args):
     )
 
     # Get batch size from config
-    batch_size = model_config.get("batch_size", 16)
+    batch_size = model_config.get("batch_size", args.batch_size)
 
     # Process all samples for each attribute
     all_results = {}
@@ -215,13 +215,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config", type=str, required=True, help="Path to configuration YAML file"
     )
-    parser.add_argument(
-        "--dataset-path", type=str, help="Override dataset path from config"
-    )
+
     parser.add_argument(
         "--attribute",
         type=str,
         help="Specific attribute to prompt about. If not provided, processes all attributes in dataset",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        help="Modify batch size from config",
     )
     parser.add_argument("--output-dir", type=str, help="Output directory for results")
 
