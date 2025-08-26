@@ -430,12 +430,153 @@ class LlavaFeatureExtractor(BaseFeatureExtractor):
         return all_layers_embeddings
 
 
+class QwenFeatureExtractor(BaseFeatureExtractor):
+    """Feature extractor for Qwen2.5-VL using vision encoder with monkey patch."""
+
+    def __init__(
+        self,
+        model_name=None,
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
+        batch_size=32,
+        device="auto",
+        extract_language=False,
+        tower_name=None,
+        projection_name=None,
+    ):
+        """
+        Initialize Qwen2.5-VL feature extractor.
+
+        Args:
+            model_name: Name for the model (for saving features)
+            model_path: HuggingFace model path
+            batch_size: Batch size for inference
+            device: Device to run on
+        """
+        super().__init__(device)
+        self.model_name = model_name or Path(model_path).stem
+        self.batch_size = batch_size
+
+        # Load processor and model
+        from transformers import Qwen2VLForConditionalGeneration
+        from src.models.qwen_vision_patch import patch_qwen_vision_model
+        
+        self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+        model = Qwen2VLForConditionalGeneration.from_pretrained(model_path)
+        
+        # Apply monkey patch for output_hidden_states support
+        self.model = patch_qwen_vision_model(model).to(self.device)
+        self.model.eval()
+
+        logging.info(f"Loaded Qwen2.5-VL model from {model_path} on {self.device}")
+
+    def _preprocess_qwen_batch(self, examples):
+        """
+        Preprocess images for Qwen2.5-VL using conversation format.
+        """
+        image_paths = examples["image_path"]
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+        
+        # Create conversations for each image
+        conversations = []
+        for image in images:
+            conversation = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image},
+                        {"type": "text", "text": "Describe this image."},  # Dummy text
+                    ],
+                }
+            ]
+            conversations.append(conversation)
+        
+        # Process all conversations
+        processed_inputs = []
+        for conversation in conversations:
+            inputs = self.processor.apply_chat_template(
+                conversation,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                padding=True,
+                return_tensors="pt",
+            )
+            processed_inputs.append(inputs)
+        
+        # Batch the inputs
+        result = {"image_path": image_paths}
+        
+        # Stack pixel values and image_grid_thw
+        if processed_inputs:
+            result["pixel_values"] = torch.cat([inp.pixel_values for inp in processed_inputs], dim=0)
+            result["image_grid_thw"] = torch.cat([inp.image_grid_thw for inp in processed_inputs], dim=0)
+        
+        return result
+
+    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
+        """
+        Extract features from all vision layers of Qwen2.5-VL.
+        """
+        logging.info(f"Extracting features from all layers of {self.model_name}...")
+
+        # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
+        all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
+
+        processed_dataset = dataset.map(
+            self._preprocess_qwen_batch,
+            batched=True,
+            load_from_cache_file=True,
+            desc="Preprocessing Images for Qwen",
+        )
+        processed_dataset.set_format(
+            type="torch", columns=["pixel_values", "image_grid_thw", "image_path"]
+        )
+
+        dataloader = DataLoader(
+            processed_dataset, batch_size=self.batch_size, shuffle=False
+        )
+
+        with torch.no_grad():
+            for batch in tqdm(
+                dataloader, desc="Extracting Qwen Vision Features", unit="batch"
+            ):
+                pixel_values = batch["pixel_values"].to(self.device)
+                image_grid_thw = batch["image_grid_thw"].to(self.device)
+                batch_image_paths: List[str] = [
+                    p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
+                ]
+
+                # Extract features using the patched vision model
+                pixel_values = pixel_values.type(self.model.model.visual.dtype)
+                final_hidden_states, all_hidden_states = self.model.model.visual(
+                    pixel_values, grid_thw=image_grid_thw, output_hidden_states=True
+                )
+
+                # Process each layer's hidden states
+                for layer_idx, layer_hidden_state in enumerate(all_hidden_states):
+                    layer_name = f"layer_{layer_idx}"
+
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
+
+                    # Global average pooling across spatial dimensions
+                    # Qwen vision features are [batch_size, num_patches, hidden_size]
+                    pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+
+                    # Store features for each image path
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = pooled_features[i]
+
+        return all_layers_embeddings
+
+
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
     """Factory function to create feature extractors."""
     extractors = {
         "dinov2": FeatureExtractor,
         "clip": FeatureExtractor,
         "llava": LlavaFeatureExtractor,
+        "qwen": QwenFeatureExtractor,
     }
 
     if extractor_type not in extractors:
