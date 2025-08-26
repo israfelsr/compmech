@@ -142,9 +142,6 @@ def main(args):
     model_config = config["model"]
     processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
 
-    # Create prompt template
-    prompt_template = "USER: Image: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
-
     # Get attribute(s) from config or args
     specific_attribute = args.attribute or config["probe"].get("specific_attribute")
 
@@ -156,6 +153,9 @@ def main(args):
         # All attributes mode
         attributes_to_process = list(dataset[0].keys())[2:]
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
+
+    # Create prompt template
+    prompt_template = "USER: Image: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
 
     def preprocess_images(examples):
         """

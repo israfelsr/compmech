@@ -1,0 +1,22 @@
+model:
+  type: qwen2.5
+  model_name: llava-1.5-7b-hf
+  model_path: /home/bzq999/data/compmech/models/Qwen2.5-VL-7B-Instruct/
+  batch_size: 16
+  device: auto
+  features_dir: /home/bzq999/data/compmech/features
+  extract_language: True
+  tower_name:
+  projection_name:
+
+
+probe:
+  type: logistic
+  cv_folds: 5
+  n_repeats: 2
+  output_dir: results/
+  seed: 42
+  specific_attribute:
+
+dataset:
+  path: /home/bzq999/data/compmech/mcrae-x-things.hf/
