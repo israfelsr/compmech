@@ -49,17 +49,17 @@ from transformers.models.qwen2_vl.processing_qwen2_vl import (
     Qwen2VLProcessor,
 )
 
-from ...activations import ACT2FN
-from ...cache_utils import Cache
-from ...configuration_utils import PretrainedConfig
-from ...feature_extraction_utils import BatchFeature
-from ...image_utils import ImageInput
-from ...modeling_flash_attention_utils import is_flash_attn_available
-from ...modeling_layers import GradientCheckpointingLayer
-from ...processing_utils import MultiModalData, ProcessingKwargs, Unpack, VideosKwargs
-from ...tokenization_utils_base import PreTokenizedInput, TextInput
-from ...utils import is_torchdynamo_compiling, logging
-from ...video_utils import VideoInput
+from transformers.activations import ACT2FN
+from transformers.cache_utils import Cache
+from transformers.configuration_utils import PretrainedConfig
+from transformers.feature_extraction_utils import BatchFeature
+from transformers.image_utils import ImageInput
+from transformers.modeling_flash_attention_utils import is_flash_attn_available
+from transformers.modeling_layers import GradientCheckpointingLayer
+from transformers.processing_utils import MultiModalData, ProcessingKwargs, Unpack, VideosKwargs
+from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
+from transformers.utils import is_torchdynamo_compiling, logging
+from transformers.video_utils import VideoInput
 
 
 if is_flash_attn_available():
@@ -297,7 +297,7 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
         return window_index, cu_window_seqlens
 
     def forward(
-        self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, **kwargs
+        self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, output_hidden_states: bool = False, **kwargs
     ) -> torch.Tensor:
         """
         Args:
@@ -345,8 +345,12 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
         )
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
-        print(f"THIS IS A TEST: {len(self.blocks)}")
+        all_hidden_states = () if output_hidden_states else None
+        
         for layer_num, blk in enumerate(self.blocks):
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+                
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
@@ -359,10 +363,15 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
                 **kwargs,
             )
 
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
         hidden_states = hidden_states[reverse_indices, :]
 
+        if output_hidden_states:
+            return hidden_states, all_hidden_states
         return hidden_states
 
 
@@ -382,6 +391,38 @@ class Qwen2_5_VLModel(Qwen2VLModel):
         self.visual = Qwen2_5_VisionTransformerPretrainedModel._from_config(
             config.vision_config
         )
+    
+    def get_image_features(
+        self,
+        pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.LongTensor] = None,
+        output_hidden_states: bool = False,
+    ):
+        """
+        Get image features from the vision encoder, optionally returning intermediate hidden states.
+        """
+        image_embeds = []
+        vision_hidden_states = [] if output_hidden_states else None
+        
+        for i, pixel_value in enumerate(pixel_values):
+            if output_hidden_states:
+                image_embed, layer_hidden_states = self.visual(
+                    pixel_value,
+                    grid_thw=image_grid_thw[i : i + 1],
+                    output_hidden_states=True
+                )
+                vision_hidden_states.append(layer_hidden_states)
+            else:
+                image_embed = self.visual(
+                    pixel_value,
+                    grid_thw=image_grid_thw[i : i + 1],
+                    output_hidden_states=False
+                )
+            image_embeds.append(image_embed)
+        
+        if output_hidden_states:
+            return image_embeds, vision_hidden_states
+        return image_embeds
 
     def get_rope_index(
         self,
@@ -659,8 +700,12 @@ class Qwen2_5_VLModel(Qwen2VLModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
+        vision_hidden_states = None
         if pixel_values is not None:
-            image_embeds = self.get_image_features(pixel_values, image_grid_thw)
+            if output_hidden_states:
+                image_embeds, vision_hidden_states = self.get_image_features(pixel_values, image_grid_thw, output_hidden_states=True)
+            else:
+                image_embeds = self.get_image_features(pixel_values, image_grid_thw)
             image_embeds = torch.cat(image_embeds, dim=0).to(
                 inputs_embeds.device, inputs_embeds.dtype
             )
@@ -739,6 +784,10 @@ class Qwen2_5_VLModel(Qwen2VLModel):
             attentions=outputs.attentions,
             rope_deltas=self.rope_deltas,
         )
+        
+        # Add vision hidden states if requested
+        if vision_hidden_states is not None:
+            output.vision_hidden_states = vision_hidden_states
         return output if return_dict else output.to_tuple()
 
 
