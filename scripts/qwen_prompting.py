@@ -360,3 +360,40 @@ def main(args):
                 )
 
     results = all_results
+
+    # Save results
+    output_dir = Path(
+        args.output_dir or config["probe"].get("output_dir", "results/qwen_prompting")
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results_filename = f"qwen_prompting_results.json"
+    results_path = output_dir / results_filename
+
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    logging.info(f"Results saved to {results_path}")
+    logging.info(f"Processed {len(results)} total sample-attribute combinations")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Prompt Qwen2.5-VL model with images using QwenPrompting class"
+    )
+    parser.add_argument(
+        "--config", type=str, required=True, help="Path to configuration YAML file"
+    )
+    parser.add_argument(
+        "--attribute",
+        type=str,
+        help="Specific attribute to prompt about. If not provided, processes all attributes in dataset",
+    )
+    parser.add_argument("--output-dir", type=str, help="Output directory for results")
+
+    args = parser.parse_args()
+
+    # Setup logging
+    setup_logging()
+
+    main(args)
