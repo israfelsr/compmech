@@ -293,11 +293,11 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--tiny":
         # Create tiny dataset with selected attributes
         logging.info("Creating tiny dataset...")
-        image_dataset, concept_only_dataset = create_tiny_dataset()
+        image_dataset = create_tiny_dataset()
     else:
         # Create full datasets
         logging.info("Creating full dataset...")
-        image_dataset, concept_only_dataset = create_dataset(
+        image_dataset = create_dataset(
             concept_file="dataset/mcrae-x-things.json",
             attribute_file="dataset/mcrae-x-things-taxonomy.json",
             image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
