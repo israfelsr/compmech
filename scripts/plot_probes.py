@@ -826,7 +826,15 @@ def main():
             metric="f1",
             save_path=f"{args.save}/attr_performance_distribution.png",
         )
-        overview_performance(results, save_path=f"{args.save}/overview_performance.png")
+        layer_data = overview_performance(results, save_path=f"{args.save}/overview_performance.png")
+        
+        # Find the best performing layer
+        best_layer = None
+        if layer_data:
+            best_idx = max(range(len(layer_data)), key=lambda i: layer_data[i]['mean'])
+            best_layer = layer_data[best_idx]['layer']
+            print(f"Best performing layer: {best_layer} (F1: {layer_data[best_idx]['mean']:.3f})")
+        
         if taxonomy:
             category_breakdown(
                 results,
@@ -834,18 +842,19 @@ def main():
                 taxonomy,
                 save_path=f"{args.save}/category_breakdown_last.png",
             )
-            category_breakdown(
-                results,
-                22,
-                taxonomy,
-                save_path=f"{args.save}/category_breakdown_11.png",
-            )
-            attribute_breakdown(
-                results,
-                22,
-                taxonomy,
-                save_path=f"{args.save}/performance_curves.png",
-            )
+            if best_layer is not None:
+                category_breakdown(
+                    results,
+                    best_layer,
+                    taxonomy,
+                    save_path=f"{args.save}/category_breakdown_best.png",
+                )
+                attribute_breakdown(
+                    results,
+                    best_layer,
+                    taxonomy,
+                    save_path=f"{args.save}/attribute_breakdown_best.png",
+                )
             performance_curves(
                 results,
                 taxonomy,

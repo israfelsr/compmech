@@ -457,12 +457,11 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         self.batch_size = batch_size
 
         # Load processor and model
-        from transformers import Qwen2VLForConditionalGeneration
         from src.models.qwen_vision_patch import patch_qwen_vision_model
-        
+
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
-        model = Qwen2VLForConditionalGeneration.from_pretrained(model_path)
-        
+        model = AutoModelForImageTextToText.from_pretrained(model_path)
+
         # Apply monkey patch for output_hidden_states support
         self.model = patch_qwen_vision_model(model).to(self.device)
         self.model.eval()
@@ -475,7 +474,7 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         """
         image_paths = examples["image_path"]
         images = [Image.open(path).convert("RGB") for path in image_paths]
-        
+
         # Create conversations for each image
         conversations = []
         for image in images:
@@ -489,7 +488,7 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 }
             ]
             conversations.append(conversation)
-        
+
         # Process all conversations
         processed_inputs = []
         for conversation in conversations:
@@ -502,15 +501,19 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 return_tensors="pt",
             )
             processed_inputs.append(inputs)
-        
+
         # Batch the inputs
         result = {"image_path": image_paths}
-        
+
         # Stack pixel values and image_grid_thw
         if processed_inputs:
-            result["pixel_values"] = torch.cat([inp.pixel_values for inp in processed_inputs], dim=0)
-            result["image_grid_thw"] = torch.cat([inp.image_grid_thw for inp in processed_inputs], dim=0)
-        
+            result["pixel_values"] = torch.cat(
+                [inp.pixel_values for inp in processed_inputs], dim=0
+            )
+            result["image_grid_thw"] = torch.cat(
+                [inp.image_grid_thw for inp in processed_inputs], dim=0
+            )
+
         return result
 
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
