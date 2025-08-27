@@ -28,8 +28,15 @@ def load_config(config_path: str) -> dict:
 
 def create_vllm_prompts_batch(image_paths: list, attribute_name: str) -> list:
     """Create VLLM-compatible prompts for a batch of images and a single attribute."""
-    prompt = "Question: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
-    prompt_text = prompt.format(attribute_name=attribute_name)
+    question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
+    
+    # Qwen2.5-VL format according to official VLLM example
+    prompt_text = (
+        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+        f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
+        f"{question}<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
 
     vllm_prompts = []
     for image_path in image_paths:
@@ -56,7 +63,7 @@ def process_samples_for_attribute(
         batch_samples = dataset[i:batch_end]
 
         # Extract image paths from batch
-        image_paths = [sample["image_path"] for sample in batch_samples]
+        image_paths = batch_samples["image_path"]
 
         # Create VLLM prompts for this batch and attribute
         vllm_prompts = create_vllm_prompts_batch(image_paths, attribute_name)
@@ -104,7 +111,7 @@ def main(args):
     logging.info(f"Loaded configuration from {args.config}")
 
     # Load dataset
-    dataset_path = args.dataset_path or config["dataset"]["path"]
+    dataset_path = config["dataset"]["path"]
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
@@ -128,9 +135,13 @@ def main(args):
     logging.info(f"Loading VLLM model: {model_path}")
     llm = LLM(
         model=model_path,
-        trust_remote_code=True,
-        max_model_len=8192,
-        enforce_eager=True,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+        },
+        limit_mm_per_prompt={"image": 1},
     )
 
     # Set sampling parameters
