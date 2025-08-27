@@ -29,7 +29,7 @@ def load_config(config_path: str) -> dict:
 def create_vllm_prompts_batch(image_paths: list, attribute_name: str) -> list:
     """Create VLLM-compatible prompts for a batch of images and a single attribute."""
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
-    
+
     # Qwen2.5-VL format according to official VLLM example
     prompt_text = (
         "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
@@ -73,16 +73,16 @@ def process_samples_for_attribute(
             outputs = llm.generate(vllm_prompts, sampling_params)
 
             # Process results for this batch
-            for j, (sample, output) in enumerate(zip(batch_samples, outputs)):
+            for j, output in enumerate(outputs):
                 response = output.outputs[0].text.strip()
 
                 results.append(
                     {
-                        "image_path": sample["image_path"],
+                        "image_path": batch_samples["image_path"][j],
                         "attribute": attribute_name,
                         "prompt": vllm_prompts[j]["prompt"],
                         "response": response,
-                        "label": sample.get(attribute_name, None),
+                        "label": batch_samples[attribute_name][j],
                     }
                 )
 
