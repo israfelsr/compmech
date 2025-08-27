@@ -60,10 +60,7 @@ def create_vllm_prompts_batch(
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
 
     # Model-specific prompt formats
-    if "paligemma" in model_name.lower():
-        # PaliGemma uses special format for VQA - we'll adapt it for attribute checking
-        prompt_text = question
-    elif "qwen2.5-vl" in model_name.lower() or "qwen2_5" in model_name.lower():
+    if "qwen2.5-vl" in model_name:
         # Qwen2.5-VL format
         prompt_text = (
             "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
@@ -71,6 +68,9 @@ def create_vllm_prompts_batch(
             f"{question}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
+    elif "paligemma" in model_name:
+        # PaliGemma uses special format for VQA - we'll adapt it for attribute checking
+        prompt_text = question
     else:
         # Default format (for other models)
         prompt_text = f"<image>\n{question}"
@@ -186,7 +186,11 @@ def main(args):
     )
 
     # Get batch size from config
-    batch_size = model_config.get("batch_size", args.batch_size)
+    batch_size = (
+        args.batch_size
+        if args.batch_size is not None
+        else model_config.get("batch_size", 32)
+    )
 
     # Process all samples for each attribute
     all_results = {}
