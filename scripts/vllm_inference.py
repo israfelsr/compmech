@@ -26,17 +26,54 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def create_vllm_prompts_batch(image_paths: list, attribute_name: str) -> list:
+def get_model_config(model_name: str) -> dict:
+    """Get model-specific VLLM configuration."""
+    model_name_lower = model_name.lower()
+
+    if "paligemma" in model_name_lower:
+        return {
+            "max_model_len": 2048,
+            "limit_mm_per_prompt": {"image": 1},
+        }
+    elif "qwen2.5-vl" in model_name_lower or "qwen2_5" in model_name_lower:
+        return {
+            "max_model_len": 4096,
+            "max_num_seqs": 5,
+            "mm_processor_kwargs": {
+                "min_pixels": 28 * 28,
+                "max_pixels": 1280 * 28 * 28,
+            },
+            "limit_mm_per_prompt": {"image": 1},
+        }
+    else:
+        # Default configuration
+        return {
+            "max_model_len": 4096,
+            "limit_mm_per_prompt": {"image": 1},
+        }
+
+
+def create_vllm_prompts_batch(
+    image_paths: list, attribute_name: str, model_name: str
+) -> list:
     """Create VLLM-compatible prompts for a batch of images and a single attribute."""
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
 
-    # Qwen2.5-VL format according to official VLLM example
-    prompt_text = (
-        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
-        f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-        f"{question}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
+    # Model-specific prompt formats
+    if "paligemma" in model_name.lower():
+        # PaliGemma uses special format for VQA - we'll adapt it for attribute checking
+        prompt_text = question
+    elif "qwen2.5-vl" in model_name.lower() or "qwen2_5" in model_name.lower():
+        # Qwen2.5-VL format
+        prompt_text = (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
+            f"{question}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+    else:
+        # Default format (for other models)
+        prompt_text = f"<image>\n{question}"
 
     vllm_prompts = []
     for image_path in image_paths:
@@ -50,7 +87,7 @@ def create_vllm_prompts_batch(image_paths: list, attribute_name: str) -> list:
 
 
 def process_samples_for_attribute(
-    llm, sampling_params, dataset, attribute_name, batch_size
+    llm, sampling_params, dataset, attribute_name, batch_size, model_name
 ):
     """Process all samples for a specific attribute using batched VLLM inference."""
     results = []
@@ -66,7 +103,9 @@ def process_samples_for_attribute(
         image_paths = batch_samples["image_path"]
 
         # Create VLLM prompts for this batch and attribute
-        vllm_prompts = create_vllm_prompts_batch(image_paths, attribute_name)
+        vllm_prompts = create_vllm_prompts_batch(
+            image_paths, attribute_name, model_name
+        )
 
         try:
             # Generate responses using VLLM
@@ -124,25 +163,20 @@ def main(args):
 
     if specific_attribute:
         # Single attribute mode
-        attributes_to_process = [specific_attribute]
-        logging.info(f"Processing single attribute: {specific_attribute}")
+        attributes_to_process = specific_attribute
+        logging.info(f"Processing attributes: {attributes_to_process}")
     else:
         # All attributes mode
         attributes_to_process = list(dataset[0].keys())[2:]
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
 
-    # Initialize VLLM model with Qwen2.5-VL
+    # Get model-specific configuration
+    vllm_config = get_model_config(model_path)
+
+    # Initialize VLLM model
     logging.info(f"Loading VLLM model: {model_path}")
-    llm = LLM(
-        model=model_path,
-        max_model_len=4096,
-        max_num_seqs=5,
-        mm_processor_kwargs={
-            "min_pixels": 28 * 28,
-            "max_pixels": 1280 * 28 * 28,
-        },
-        limit_mm_per_prompt={"image": 1},
-    )
+    logging.info(f"Model config: {vllm_config}")
+    llm = LLM(model=model_path, **vllm_config)
 
     # Set sampling parameters
     sampling_params = SamplingParams(
@@ -157,6 +191,12 @@ def main(args):
     # Process all samples for each attribute
     all_results = {}
 
+    # Set up output directory
+    output_dir = Path(
+        args.output_dir or config["probe"].get("output_dir", "results/vllm_inference")
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     for attr_idx, attribute_name in enumerate(attributes_to_process):
         logging.info(
             f"Processing attribute {attr_idx+1}/{len(attributes_to_process)}: {attribute_name}"
@@ -164,61 +204,49 @@ def main(args):
 
         try:
             results = process_samples_for_attribute(
-                llm, sampling_params, dataset, attribute_name, batch_size
+                llm,
+                sampling_params,
+                dataset,
+                attribute_name,
+                batch_size,
+                model_config["type"],
             )
             all_results[attribute_name] = results
-            logging.info(
-                f"Completed {attribute_name}: {len(results)} samples processed"
-            )
-        except Exception as e:
-            logging.error(f"Error processing attribute {attribute_name}: {e}")
-            all_results[attribute_name] = []  # Empty results for failed attribute
-            continue
 
-    # Save results
-    output_dir = Path(
-        args.output_dir or config["probe"].get("output_dir", "results/vllm_inference")
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if len(attributes_to_process) == 1:
-        # Single attribute: save as before
-        attribute_name = attributes_to_process[0]
-        results = all_results[attribute_name]
-        results_filename = f"vllm_inference_results_{attribute_name}.json"
-        results_path = output_dir / results_filename
-
-        with open(results_path, "w") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-
-        logging.info(f"Results saved to {results_path}")
-        logging.info(f"Processed {len(results)} samples successfully")
-    else:
-        # Multiple attributes: save separate files and a combined file
-        total_samples = 0
-        for attribute_name, results in all_results.items():
+            # Save individual attribute results immediately
             results_filename = f"vllm_inference_results_{attribute_name}.json"
             results_path = output_dir / results_filename
 
             with open(results_path, "w") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
 
-            total_samples += len(results)
             logging.info(
-                f"Saved {attribute_name}: {len(results)} samples -> {results_path}"
+                f"Completed {attribute_name}: {len(results)} samples processed -> saved to {results_path}"
             )
 
-        # Save combined results
+        except Exception as e:
+            logging.error(f"Error processing attribute {attribute_name}: {e}")
+
+            continue
+
+    # Save combined results (individual files already saved)
+    if len(attributes_to_process) > 1:
+        # Only save combined file for multiple attributes
         combined_filename = f"vllm_inference_results_all.json"
         combined_path = output_dir / combined_filename
 
         with open(combined_path, "w") as f:
             json.dump(all_results, f, indent=2, ensure_ascii=False)
 
+        total_samples = sum(len(results) for results in all_results.values())
         logging.info(f"Combined results saved to {combined_path}")
         logging.info(
             f"Processed {len(attributes_to_process)} attributes with {total_samples} total samples"
         )
+    else:
+        # Single attribute case - already saved above
+        total_samples = len(all_results[attributes_to_process[0]])
+        logging.info(f"Processed {total_samples} samples successfully")
 
 
 if __name__ == "__main__":
