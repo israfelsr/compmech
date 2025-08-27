@@ -55,7 +55,9 @@ def scan_images_in_folders(image_dir: str) -> Dict[str, List[str]]:
 
 
 def create_attribute_mapping(
-    concept_data: List[List[str]], attribute_data: Dict[str, str]
+    concept_data: List[List[str]],
+    attribute_data: Dict[str, str],
+    selected_attributes: List[str] = None,
 ) -> Tuple[Dict, List[str], int]:
     """
     Create mappings between concepts, attributes, and indices.
@@ -63,21 +65,37 @@ def create_attribute_mapping(
     Args:
         concept_data: List of [concept, attribute] pairs
         attribute_data: Dictionary mapping attributes to taxonomies
+        selected_attributes: Optional list of specific attributes to include (for filtered datasets)
 
     Returns:
         Tuple of (concept_to_attributes, all_attributes, num_attributes)
     """
-    # Create vocabulary and mappings for attributes
-    all_attributes = sorted(list(attribute_data.keys()))
+    # Filter attributes if selected_attributes is provided
+    if selected_attributes is not None:
+        # Only keep attributes that are in both attribute_data and selected_attributes
+        filtered_attribute_data = {
+            attr: taxonomy
+            for attr, taxonomy in attribute_data.items()
+            if attr in selected_attributes
+        }
+        all_attributes = sorted(list(filtered_attribute_data.keys()))
+        logging.info(
+            f"Filtering to {len(all_attributes)} selected attributes from {len(attribute_data)} total"
+        )
+    else:
+        all_attributes = sorted(list(attribute_data.keys()))
+
     attribute_to_idx = {attr: i for i, attr in enumerate(all_attributes)}
     num_attributes = len(all_attributes)
 
-    # Process concepts and group attributes by concept
+    # Process concepts and group attributes by concept (only keeping selected attributes)
     concept_to_attributes = {}
     for concept, attribute in concept_data:
-        if concept not in concept_to_attributes:
-            concept_to_attributes[concept] = []
-        concept_to_attributes[concept].append(attribute)
+        # Only include this attribute if it's in our selected list (or no filtering applied)
+        if selected_attributes is None or attribute in selected_attributes:
+            if concept not in concept_to_attributes:
+                concept_to_attributes[concept] = []
+            concept_to_attributes[concept].append(attribute)
 
     return concept_to_attributes, all_attributes, num_attributes
 
@@ -145,71 +163,20 @@ def create_dataset_samples(
     return samples
 
 
-def create_concept_only_samples(
-    concept_to_attributes: Dict[str, List[str]],
-    all_attributes: List[str],
-) -> Dict[str, List]:
-    """
-    Create concept-only dataset samples with only concepts and their binary attributes (no images).
-
-    Args:
-        concept_to_attributes: Dictionary mapping concepts to list of their attributes
-        all_attributes: List of all attribute names
-
-    Returns:
-        Dictionary with 'concept' and individual attribute columns
-    """
-    # Initialize sample dictionary with concept only
-    samples = {
-        "concept": [],
-    }
-
-    # Add columns for each attribute
-    for attr_name in all_attributes:
-        samples[attr_name] = []
-
-    # Create attribute to index mapping
-    attribute_to_idx = {attr: i for i, attr in enumerate(all_attributes)}
-
-    # Create one sample per concept
-    for concept_name, concept_attributes in concept_to_attributes.items():
-        # Create binary vector for this concept
-        binary_attributes = [0] * len(all_attributes)
-        for attr in concept_attributes:
-            if attr in attribute_to_idx:
-                idx = attribute_to_idx[attr]
-                binary_attributes[idx] = 1
-
-        # Add sample for this concept
-        samples["concept"].append(concept_name)
-
-        # Add binary value for each attribute
-        for attr_name, attr_value in zip(all_attributes, binary_attributes):
-            samples[attr_name].append(attr_value)
-
-    logging.info(f"Created {len(samples['concept'])} concept-only dataset samples")
-    logging.info(f"Concept dataset has {len(all_attributes)} attributes")
-
-    return samples
-
-
 def create_dataset(
     concept_file="dataset/mcrae-x-things.json",
     attribute_file="dataset/mcrae-x-things-taxonomy.json",
     image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
     output_dir="/home/bzq999/data/compmech/mcrae-x-things.hf",
-    concept_only_output_dir="/home/bzq999/data/compmech/mcrae-x-things-concepts-only.hf",
+    selected_attributes=None,
 ):
     """
     Create HuggingFace datasets from the concept-attribute data and images.
-    Creates both an image-based dataset and a concept-only dataset in parallel.
-
     Args:
         concept_file: Path to JSON file with concept-attribute pairs
         attribute_file: Path to JSON file with attribute taxonomy
         image_dir: Path to directory containing object folders with images
         output_dir: Directory to save the image-based HuggingFace dataset
-        concept_only_output_dir: Directory to save the concept-only HuggingFace dataset
 
     Returns:
         Tuple of (image_dataset, concept_only_dataset)
@@ -234,7 +201,7 @@ def create_dataset(
 
     # Create attribute mappings
     concept_to_attributes, all_attributes, num_attributes = create_attribute_mapping(
-        concept_data, attribute_data
+        concept_data, attribute_data, selected_attributes
     )
 
     logging.info(f"Processing {num_attributes} attributes")
@@ -245,32 +212,16 @@ def create_dataset(
         object_to_images, concept_to_attributes, all_attributes
     )
 
-    # Create concept-only dataset samples
-    logging.info("Creating concept-only dataset...")
-    concept_only_samples = create_concept_only_samples(
-        concept_to_attributes, all_attributes
-    )
-
     # Create HuggingFace datasets
     dataset = Dataset.from_dict(dataset_samples)
-    concept_only_dataset = Dataset.from_dict(concept_only_samples)
 
     logging.info(f"Created image dataset with {len(dataset)} samples")
-    logging.info(
-        f"Created concept-only dataset with {len(concept_only_dataset)} samples"
-    )
     logging.info(f"Image dataset features: {dataset.features}")
-    logging.info(f"Concept-only dataset features: {concept_only_dataset.features}")
 
     # Save the image-based dataset
     output_path = Path(output_dir)
     dataset.save_to_disk(str(output_path))
     logging.info(f"Image dataset saved to: {output_path}")
-
-    # Save the concept-only dataset
-    concept_only_output_path = Path(concept_only_output_dir)
-    concept_only_dataset.save_to_disk(str(concept_only_output_path))
-    logging.info(f"Concept-only dataset saved to: {concept_only_output_path}")
 
     # Save metadata for image dataset
     metadata = {
@@ -290,30 +241,64 @@ def create_dataset(
         json.dump(metadata, f, indent=2)
     logging.info(f"Image dataset metadata saved to: {metadata_path}")
 
-    # Save metadata for concept-only dataset
-    concept_metadata = {
-        "dataset_name": concept_only_output_path.stem,
-        "dataset_type": "concept_only",
-        "num_samples": len(concept_only_dataset),
-        "num_attributes": num_attributes,
-        "attribute_names": all_attributes,
-        "num_objects": len(concept_to_attributes),
-        "concept_file": concept_file,
-        "attribute_file": attribute_file,
-    }
+    return dataset
 
-    concept_metadata_path = concept_only_output_path / "metadata.json"
-    with open(concept_metadata_path, "w") as f:
-        json.dump(concept_metadata, f, indent=2)
-    logging.info(f"Concept-only dataset metadata saved to: {concept_metadata_path}")
 
-    return dataset, concept_only_dataset
+def create_tiny_dataset():
+    """Create a tiny version of the dataset with only selected attributes."""
+
+    # Your selected attributes
+    selected_attrs = [
+        "beh_-_runs",
+        "beh_-_flies",
+        "beh_-_travels_in_herds",
+        "an_animal",
+        "a_bird",
+        "a_vehicle",
+        "a_food",
+        "found_in_houses",
+        "grows_in_gardens",
+        "beh_-_lays_eggs",
+        "lives_in_wilderness",
+        "has_eyes",
+        "has_legs",
+        "has_feathers",
+        "tastes_good",
+        "tastes_sweet",
+        "is_soft",
+        "is_edible",
+        "used_for_eating",
+        "used_for_cooking",
+    ]
+
+    logging.info(
+        f"Creating tiny dataset with {len(selected_attrs)} selected attributes"
+    )
+
+    # Create both datasets with filtered attributes
+    image_dataset, concept_only_dataset = create_dataset(
+        concept_file="dataset/mcrae-x-things.json",
+        attribute_file="dataset/mcrae-x-things-taxonomy-simp.json",
+        image_dir="/leonardo_work/EUHPC_D27_102/compmech/images_THINGS/",
+        output_dir="/leonardo_work/EUHPC_D27_102/compmech/mcrae-x-things-tiny.hf",
+        selected_attributes=selected_attrs,
+    )
+
+    return image_dataset, concept_only_dataset
 
 
 if __name__ == "__main__":
-    # Create both datasets
-    image_dataset, concept_only_dataset = create_dataset(
-        concept_file="dataset/mcrae-x-things.json",
-        attribute_file="dataset/mcrae-x-things-taxonomy.json",
-        image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
-    )
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--tiny":
+        # Create tiny dataset with selected attributes
+        logging.info("Creating tiny dataset...")
+        image_dataset, concept_only_dataset = create_tiny_dataset()
+    else:
+        # Create full datasets
+        logging.info("Creating full dataset...")
+        image_dataset, concept_only_dataset = create_dataset(
+            concept_file="dataset/mcrae-x-things.json",
+            attribute_file="dataset/mcrae-x-things-taxonomy.json",
+            image_dir="/home/bzq999/data/compmech/image_database_things/object_images",
+        )
