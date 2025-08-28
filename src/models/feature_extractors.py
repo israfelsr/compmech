@@ -85,7 +85,7 @@ class BaseFeatureExtractor(ABC):
     def extract_and_save(
         self,
         dataset: Dataset,
-        features_dir: str = "/home/bzq999/data/compmech/features/",
+        features_dir: str = "",
         language_model: str = None,
     ):
         logging.info(
@@ -483,36 +483,28 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                     "role": "user",
                     "content": [
                         {"type": "image", "image": image},
-                        {"type": "text", "text": "Describe this image."},  # Dummy text
+                        {"type": "text", "text": " "},
                     ],
                 }
             ]
             conversations.append(conversation)
 
         # Process all conversations
-        processed_inputs = []
-        for conversation in conversations:
-            inputs = self.processor.apply_chat_template(
-                conversation,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                padding=True,
-                return_tensors="pt",
-            )
-            processed_inputs.append(inputs)
+        inputs = self.processor.apply_chat_template(
+            conversations,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            padding=True,
+            return_tensors="pt",
+        )
 
         # Batch the inputs
         result = {"image_path": image_paths}
 
         # Stack pixel values and image_grid_thw
-        if processed_inputs:
-            result["pixel_values"] = torch.cat(
-                [inp.pixel_values for inp in processed_inputs], dim=0
-            )
-            result["image_grid_thw"] = torch.cat(
-                [inp.image_grid_thw for inp in processed_inputs], dim=0
-            )
+        result["pixel_values"] = inputs["pixel_values"]
+        result["image_grid_thw"] = inputs["image_grid_thw"]
 
         return result
 
@@ -579,7 +571,7 @@ def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor
         "dinov2": FeatureExtractor,
         "clip": FeatureExtractor,
         "llava": LlavaFeatureExtractor,
-        "qwen": QwenFeatureExtractor,
+        "qwen2.5-vl": QwenFeatureExtractor,
     }
 
     if extractor_type not in extractors:
