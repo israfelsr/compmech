@@ -622,37 +622,75 @@ class VLLMQwenFeatureExtractor(BaseFeatureExtractor):
     def _get_vision_model(self):
         """Access the vision model from VLLM's internal structure."""
         try:
-            # Navigate through VLLM's internal structure to get the vision model
-            model_executor = self.llm.llm_engine.model_executor
-            if hasattr(model_executor, "driver_worker"):
-                # Single GPU case
-                worker = model_executor.driver_worker
+            # Try different VLLM internal structures based on version
+            llm_engine = self.llm.llm_engine
+            
+            # Try newer VLLM structure first
+            if hasattr(llm_engine, 'engine'):
+                engine = llm_engine.engine
+                if hasattr(engine, 'model_executor'):
+                    model_executor = engine.model_executor
+                elif hasattr(engine, 'worker'):
+                    # Single worker case
+                    worker = engine.worker
+                    model = worker.model
+                else:
+                    raise AttributeError("Could not find model executor in engine")
+            elif hasattr(llm_engine, 'model_executor'):
+                # Older VLLM structure
+                model_executor = llm_engine.model_executor
             else:
-                # Multi GPU case - get first worker
-                worker = list(model_executor.workers.values())[0]
-
-            # Get the actual model
-            model = worker.model_runner.model
+                # Try direct access to worker
+                if hasattr(llm_engine, 'worker'):
+                    worker = llm_engine.worker
+                    model = worker.model
+                else:
+                    raise AttributeError("Could not find model executor or worker")
+            
+            # Get worker and model if we have model_executor
+            if 'model_executor' in locals():
+                if hasattr(model_executor, "driver_worker"):
+                    # Single GPU case
+                    worker = model_executor.driver_worker
+                elif hasattr(model_executor, "workers"):
+                    # Multi GPU case - get first worker
+                    worker = list(model_executor.workers.values())[0]
+                else:
+                    raise AttributeError("Could not find worker in model executor")
+                
+                # Get the actual model
+                model = worker.model_runner.model if hasattr(worker, 'model_runner') else worker.model
 
             # Access the vision encoder
             if hasattr(model, "model") and hasattr(model.model, "visual"):
                 vision_model = model.model.visual
                 vision_model.eval()
                 return vision_model
+            elif hasattr(model, "visual"):
+                vision_model = model.visual
+                vision_model.eval()
+                return vision_model
             else:
+                # Log model structure for debugging
+                logging.error(f"Model structure: {type(model)}")
+                if hasattr(model, '__dict__'):
+                    logging.error(f"Model attributes: {list(model.__dict__.keys())}")
                 raise AttributeError("Could not find vision model in VLLM structure")
 
         except Exception as e:
             logging.error(f"Failed to access vision model from VLLM: {e}")
+            # Try to provide more debugging info
+            logging.error(f"LLM engine type: {type(self.llm.llm_engine)}")
+            if hasattr(self.llm.llm_engine, '__dict__'):
+                logging.error(f"LLM engine attributes: {list(self.llm.llm_engine.__dict__.keys())}")
             raise
 
     def _create_vllm_prompts(self, image_paths: list) -> list:
         """Create VLLM-compatible prompts for feature extraction."""
         # Simple prompt for feature extraction (we just need to process the images)
         prompt_text = (
-            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
             "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-            "Describe this image.<|im_end|>\n"
+            "<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
 
@@ -720,39 +758,49 @@ class VLLMQwenFeatureExtractor(BaseFeatureExtractor):
     ):
         """Extract features from a batch using VLLM's internal processing."""
 
-        # Process the prompts to get the preprocessed inputs
-        # This leverages VLLM's efficient preprocessing
         try:
-            # Get the model inputs by preprocessing through VLLM
-            # We need to access VLLM's preprocessing pipeline
-            model_executor = self.llm.llm_engine.model_executor
-            if hasattr(model_executor, "driver_worker"):
-                worker = model_executor.driver_worker
-            else:
-                worker = list(model_executor.workers.values())[0]
-
-            model_runner = worker.model_runner
-
-            # Create sequence groups from prompts (VLLM's internal format)
-            from vllm.sequence import SamplingParams as VLLMSamplingParams
-            from vllm.inputs import LLMInputs
-
-            # Convert our prompts to VLLM's internal format and process
-            # This is a simplified approach - we'll use VLLM's generate but hook into the vision processing
-
-            # For now, let's use a direct approach with the vision model
             # Extract images from prompts
             images = [prompt["multi_modal_data"]["image"] for prompt in vllm_prompts]
-
-            # Use VLLM's processor to handle the images
-            processor = (
-                self.llm.llm_engine.model_executor.driver_worker.model_runner.model.processor
-            )
-
-            # Create minimal text inputs for processing
             texts = [prompt["prompt"] for prompt in vllm_prompts]
 
-            # Process through VLLM's pipeline
+            # Try to get processor from VLLM's internal structure
+            processor = None
+            try:
+                # Try different ways to access the processor
+                llm_engine = self.llm.llm_engine
+                
+                if hasattr(llm_engine, 'engine'):
+                    engine = llm_engine.engine
+                    if hasattr(engine, 'worker'):
+                        worker = engine.worker
+                        if hasattr(worker, 'model') and hasattr(worker.model, 'processor'):
+                            processor = worker.model.processor
+                elif hasattr(llm_engine, 'worker'):
+                    worker = llm_engine.worker
+                    if hasattr(worker, 'model') and hasattr(worker.model, 'processor'):
+                        processor = worker.model.processor
+                elif hasattr(llm_engine, 'model_executor'):
+                    model_executor = llm_engine.model_executor
+                    if hasattr(model_executor, "driver_worker"):
+                        worker = model_executor.driver_worker
+                    else:
+                        worker = list(model_executor.workers.values())[0]
+                    
+                    if hasattr(worker, 'model_runner') and hasattr(worker.model_runner, 'model'):
+                        if hasattr(worker.model_runner.model, 'processor'):
+                            processor = worker.model_runner.model.processor
+                
+                if processor is None:
+                    # Fallback: create processor directly
+                    from transformers import AutoProcessor
+                    processor = AutoProcessor.from_pretrained(self.model_path)
+                    
+            except Exception as e:
+                logging.warning(f"Could not access VLLM processor, using fallback: {e}")
+                from transformers import AutoProcessor
+                processor = AutoProcessor.from_pretrained(self.model_path)
+
+            # Process through the processor
             inputs = processor(
                 text=texts, images=images, return_tensors="pt", padding=True
             )
