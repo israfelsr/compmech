@@ -464,7 +464,8 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         model = AutoModelForImageTextToText.from_pretrained(model_path)
 
         # Apply monkey patch for output_hidden_states support
-        self.model = patch_qwen_vision_model(model).to(self.device)
+        model = patch_qwen_vision_model(model)
+        self.model = self.model.model.visual.to(device)
         self.model.eval()
 
         logging.info(f"Loaded Qwen2.5-VL model from {model_path} on {self.device}")
@@ -531,7 +532,7 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 )
                 image_grid_thw = inputs["image_grid_thw"]
 
-                final_hidden_states, all_hidden_states = self.model.model.visual(
+                final_hidden_states, all_hidden_states = self.model(
                     pixel_values.to(self.device),
                     grid_thw=image_grid_thw.to(self.device),
                     output_hidden_states=True,
