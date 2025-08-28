@@ -18,6 +18,7 @@ from PIL import Image
 from functools import partial
 from operator import attrgetter
 import os
+from qwen_vl_utils import process_vision_info
 
 
 class BaseFeatureExtractor(ABC):
@@ -111,7 +112,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         self,
         model_name=None,
         model_path="facebook/dinov2-base",
-        batch_size=32,
+        batch_size=16,
         device="auto",
         extract_language=False,
         tower_name=None,
@@ -468,52 +469,11 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
         logging.info(f"Loaded Qwen2.5-VL model from {model_path} on {self.device}")
 
-    def _preprocess_qwen_batch(self, examples):
-        """
-        Preprocess images for Qwen2.5-VL using conversation format.
-        """
-        image_paths = examples["image_path"]
-        images = [Image.open(path).convert("RGB") for path in image_paths]
-
-        # Create conversations for each image
-        conversations = []
-        for image in images:
-            conversation = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image},
-                        {"type": "text", "text": " "},
-                    ],
-                }
-            ]
-            conversations.append(conversation)
-
-        # Process all conversations
-        inputs = self.processor.apply_chat_template(
-            conversations,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            padding=True,
-            return_tensors="pt",
-        )
-
-        # Batch the inputs
-        result = {"image_path": image_paths}
-
-        # Stack pixel values and image_grid_thw
-        result["pixel_values"] = inputs["pixel_values"]
-        result["image_grid_thw"] = inputs["image_grid_thw"]
-
-        return result
-
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract features from all vision layers of Qwen2.5-VL using on-the-fly processing.
         """
-        from src.models.qwen_vision_patch import process_vision_info
-        
+
         logging.info(f"Extracting features from all layers of {self.model_name}...")
 
         # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
@@ -521,14 +481,18 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
         # Process dataset in batches on the fly
         num_samples = len(dataset)
-        for i in tqdm(range(0, num_samples, self.batch_size), desc="Extracting Qwen Vision Features", unit="batch"):
+        for i in tqdm(
+            range(0, num_samples, self.batch_size),
+            desc="Extracting Qwen Vision Features",
+            unit="batch",
+        ):
             batch_end = min(i + self.batch_size, num_samples)
             batch_data = dataset.select(range(i, batch_end))
-            
+
             # Get image paths and load images
             image_paths = [sample["image_path"] for sample in batch_data]
             images = [Image.open(path).convert("RGB") for path in image_paths]
-            
+
             # Create messages for batch processing
             messages = []
             for image in images:
@@ -542,14 +506,16 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                     }
                 ]
                 messages.append(message)
-            
+
             # Preparation for batch inference
             texts = [
-                self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+                self.processor.apply_chat_template(
+                    msg, tokenize=False, add_generation_prompt=True
+                )
                 for msg in messages
             ]
             image_inputs, video_inputs = process_vision_info(messages)
-            
+
             inputs = self.processor(
                 text=texts,
                 images=image_inputs,
@@ -557,15 +523,18 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 padding=True,
                 return_tensors="pt",
             )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             with torch.no_grad():
                 # Extract features using the patched vision model
-                pixel_values = inputs["pixel_values"].type(self.model.model.visual.dtype)
+                pixel_values = inputs["pixel_values"].type(
+                    self.model.model.visual.dtype
+                )
                 image_grid_thw = inputs["image_grid_thw"]
-                
+
                 final_hidden_states, all_hidden_states = self.model.model.visual(
-                    pixel_values, grid_thw=image_grid_thw, output_hidden_states=True
+                    pixel_values.to(self.device),
+                    grid_thw=image_grid_thw.to(self.device),
+                    output_hidden_states=True,
                 )
 
                 # Process each layer's hidden states
