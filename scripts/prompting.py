@@ -34,7 +34,7 @@ def load_config(config_path: str) -> dict:
 
 def get_model_and_processor(model_path: str, model_type: str):
     """Load model and processor based on model type."""
-    if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
+    if "paligemma2" in model_type:
         model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_path, torch_dtype=torch.bfloat16, device_map="auto"
         ).eval()
