@@ -7,6 +7,8 @@ from transformers import (
     AutoModel,
     AutoProcessor,
     AutoModelForImageTextToText,
+    PaliGemmaProcessor,
+    PaliGemmaForConditionalGeneration,
 )
 from tqdm import tqdm
 import logging
@@ -552,6 +554,162 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                   all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
 
+class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
+    """Feature extractor for PaliGemma2 models using vision encoder and language model."""
+
+    def __init__(
+        self,
+        model_name=None,
+        model_path="google/paligemma2-3b-ft-docci-448",
+        batch_size=16,
+        device="auto",
+        extract_language=True,
+        tower_name=None,
+        projection_name=None,
+    ):
+        """
+        Initialize PaliGemma feature extractor.
+
+        Args:
+            model_name: Name for the model (for saving features)
+            model_path: HuggingFace model path
+            batch_size: Batch size for inference
+            device: Device to run on
+            extract_language: Whether to extract language features (default True)
+        """
+        super().__init__(device)
+        self.model_name = model_name or Path(model_path).stem
+        self.batch_size = batch_size
+        self.extract_language = extract_language
+
+        # Load processor and model
+        self.processor = PaliGemmaProcessor.from_pretrained(model_path, use_fast=True)
+        self.model = PaliGemmaForConditionalGeneration.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16, device_map="auto"
+        ).eval()
+
+        logging.info(f"Loaded PaliGemma model from {model_path} on {self.model.device}")
+
+    def _preprocess_image_batch(self, examples):
+        """
+        Loads images from paths and processes them with the "<image>" prompt.
+        This function is designed to be mapped over a HuggingFace Dataset.
+        """
+        image_paths = examples["image_path"]
+        images = [Image.open(path).convert("RGB") for path in image_paths]
+        
+        # Use only "<image>" as text prompt - no additional text
+        text = ["<image>"] * len(images)
+        
+        inputs = self.processor(text=text, images=images, return_tensors="pt")
+        result = {"image_path": image_paths}
+        for key, value in inputs.items():
+            result[key] = value
+        return result
+
+    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
+        """
+        Extract features from both vision encoder and language model of PaliGemma.
+
+        Args:
+            dataset: HuggingFace Dataset to extract features from
+
+        Returns:
+            Dict mapping layer names to {image_path: features} dictionaries
+        """
+        logging.info(f"Extracting features from PaliGemma vision + language model...")
+
+        all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
+
+        # Preprocess dataset
+        processed_dataset = dataset.map(
+            self._preprocess_image_batch,
+            batched=True,
+            load_from_cache_file=True,
+            desc="Preprocessing Images for PaliGemma",
+        )
+        
+        # Set format for torch dataloader
+        processed_dataset.set_format(
+            type="torch", 
+            columns=["pixel_values", "input_ids", "attention_mask", "image_path"]
+        )
+
+        dataloader = DataLoader(
+            processed_dataset, batch_size=self.batch_size, shuffle=False
+        )
+
+        with torch.no_grad():
+            for batch in tqdm(
+                dataloader, desc="Extracting PaliGemma Features", unit="batch"
+            ):
+                # Prepare inputs
+                inputs = {
+                    "pixel_values": batch["pixel_values"].to(self.model.device),
+                    "input_ids": batch["input_ids"].to(self.model.device),
+                    "attention_mask": batch["attention_mask"].to(self.model.device),
+                }
+                
+                batch_image_paths: List[str] = [
+                    p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
+                ]
+                
+                # Forward pass with hidden states
+                outputs = self.model(**inputs, output_hidden_states=True, return_dict=True)
+
+                # Extract vision encoder features
+                if hasattr(outputs, 'vision_outputs') and outputs.vision_outputs is not None:
+                    vision_outputs = outputs.vision_outputs
+                    if hasattr(vision_outputs, 'hidden_states'):
+                        vision_hidden_states = vision_outputs.hidden_states
+                        for layer_idx, layer_hidden_state in enumerate(vision_hidden_states):
+                            layer_name = f"vision_layer_{layer_idx}"
+                            if layer_name not in all_layers_embeddings:
+                                all_layers_embeddings[layer_name] = {}
+
+                            # Global average pooling over spatial dimensions
+                            pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+                            
+                            for i, path in enumerate(batch_image_paths):
+                                all_layers_embeddings[layer_name][path] = pooled_features[i]
+
+                # Extract language model features if enabled
+                if self.extract_language and hasattr(outputs, 'hidden_states') and outputs.hidden_states:
+                    language_hidden_states = outputs.hidden_states
+                    for layer_idx, layer_hidden_state in enumerate(language_hidden_states):
+                        layer_name = f"language_layer_{layer_idx}"
+                        if layer_name not in all_layers_embeddings:
+                            all_layers_embeddings[layer_name] = {}
+
+                        # Average over sequence length to get sentence-level representation
+                        # Only consider non-padding tokens using attention mask
+                        attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
+                        masked_hidden_states = layer_hidden_state * attention_mask
+                        pooled_features = (
+                            masked_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)
+                        ).cpu().numpy()
+                        
+                        for i, path in enumerate(batch_image_paths):
+                            all_layers_embeddings[layer_name][path] = pooled_features[i]
+
+                # Extract final multimodal representation
+                if hasattr(outputs, 'last_hidden_state'):
+                    layer_name = "multimodal_final"
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
+
+                    attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
+                    masked_hidden_states = outputs.last_hidden_state * attention_mask
+                    pooled_features = (
+                        masked_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)
+                    ).cpu().numpy()
+                    
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = pooled_features[i]
+
+        return all_layers_embeddings
+
+
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
     """Factory function to create feature extractors."""
     extractors = {
@@ -559,6 +717,8 @@ def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor
         "clip": FeatureExtractor,
         "llava": LlavaFeatureExtractor,
         "qwen2.5-vl": QwenFeatureExtractor,
+        "paligemma2": PaliGemmaFeatureExtractor,
+        "paligemma": PaliGemmaFeatureExtractor,
     }
 
     if extractor_type not in extractors:

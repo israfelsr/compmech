@@ -73,30 +73,6 @@ def main():
 
     processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
 
-    # def _preprocess_mm_batch(
-    #     examples,
-    # ):
-    #     """
-    #     Loads images from paths and processes them using the given processor.
-    #     This function is designed to be mapped over a HuggingFace Dataset.
-    #     """
-    #     image_paths = examples["image_path"]
-
-    #     images = [Image.open(path).convert("RGB") for path in image_paths]
-    #     text = ["<image>"] * len(images)
-    #     inputs = processor(images=images, text=text, return_tensors="pt")
-    #     result = {"image_path": image_paths}
-    #     for key, value in inputs.items():
-    #         result[key] = value
-    #     return result
-
-    # processed_dataset = dataset.map(
-    #     _preprocess_mm_batch,
-    #     batched=True,
-    #     load_from_cache_file=True,
-    #     desc="Preprocessing Images",
-    # )
-
     # Initialize feature extractor
     extractor = get_feature_extractor(
         extractor_type=model_config["type"],
