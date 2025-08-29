@@ -12,8 +12,8 @@ import os
 # Disable tokenizers parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Add src to path to import utilities
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+# Add project root to path to import utilities
+sys.path.append(str(Path(__file__).parent.parent))
 from src.utils.logging_utils import setup_logging
 
 # VLLM imports
@@ -68,7 +68,7 @@ def create_vllm_prompts_batch(
     # Model-specific prompt formats
     if "paligemma2" in model_name:
         # PaliGemma2 uses task-specific prefixes
-        prompt_text = f"answer {question}"
+        prompt_text = f"<image>\n{question}"
     elif "qwen2.5-vl" in model_name:
         # Qwen2.5-VL format
         prompt_text = (
@@ -79,7 +79,7 @@ def create_vllm_prompts_batch(
         )
     elif "paligemma" in model_name:
         # PaliGemma uses special format for VQA - we'll adapt it for attribute checking
-        prompt_text = question
+        prompt_text = f"<image>\n{question}"
     else:
         # Default format (for other models)
         prompt_text = f"<image>\n{question}"
