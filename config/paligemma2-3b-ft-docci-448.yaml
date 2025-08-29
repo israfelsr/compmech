@@ -1,0 +1,22 @@
+model:
+  type: paligemma2
+  model_name: paligemma2-3b-ft-docci-448
+  model_path: /leonardo_scratch/fast/EUHPC_D27_102/models/paligemma2-3b-ft-docci-448
+  batch_size: 16
+  device: auto
+  features_dir: /leonardo_work/EUHPC_D27_102/compmech/features
+  extract_language: False
+  tower_name:
+  projection_name:
+
+
+probe:
+  type: logistic
+  cv_folds: 5
+  n_repeats: 2
+  output_dir: results/
+  seed: 42
+  specific_attribute: ['a_bird', 'a_food', 'an_animal', 'has_legs', 'a_vehicle', 'beh_-_flies']
+
+dataset:
+  path: /leonardo_work/EUHPC_D27_102/compmech/mcrae-x-things-tiny.hf

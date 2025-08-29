@@ -462,377 +462,94 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         from src.models.qwen_vision_patch import patch_qwen_vision_model
 
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
-        model = AutoModelForImageTextToText.from_pretrained(model_path)
-
-        # Apply monkey patch for output_hidden_states support
-        model = patch_qwen_vision_model(model)
-        self.model = model.model.visual.to(self.device)
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16, device_map="auto"
+        )
         self.model.eval()
+
+        # apply path vision
+        self.model = patch_qwen_vision_model(self.model)
 
         logging.info(f"Loaded Qwen2.5-VL model from {model_path} on {self.device}")
 
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
-        """
-        Extract features from all vision layers of Qwen2.5-VL using on-the-fly processing.
-        """
+        """Extract features from both vision and language models."""
+        logging.info(f"Extracting features from vision + language model...")
 
-        logging.info(f"Extracting features from all layers of {self.model_name}...")
-
-        # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        # Process dataset in batches on the fly
-        num_samples = len(dataset)
-        for i in tqdm(
-            range(0, num_samples, self.batch_size),
-            desc="Extracting Qwen Vision Features",
-            unit="batch",
-        ):
-            batch_end = min(i + self.batch_size, num_samples)
-            batch_data = dataset.select(range(i, batch_end))
-
-            # Get image paths and load images
-            image_paths = [sample["image_path"] for sample in batch_data]
-            images = [Image.open(path).convert("RGB") for path in image_paths]
-
-            # Create messages for batch processing
-            messages = []
-            for image in images:
-                message = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image", "image": image},
-                            {"type": "text", "text": " "},
-                        ],
-                    }
-                ]
-                messages.append(message)
-
-            # Preparation for batch inference
-            texts = [
-                self.processor.apply_chat_template(
-                    msg, tokenize=False, add_generation_prompt=True
-                )
-                for msg in messages
-            ]
-            image_inputs, video_inputs = process_vision_info(messages)
-
-            inputs = self.processor(
-                text=texts,
-                images=image_inputs,
-                videos=video_inputs,
-                padding=True,
-                return_tensors="pt",
-            )
-
-            with torch.no_grad():
-                # Extract features using the patched vision model
-                pixel_values = inputs["pixel_values"].type(self.model.dtype)
-                image_grid_thw = inputs["image_grid_thw"]
-
-                final_hidden_states, all_hidden_states = self.model(
-                    pixel_values.to(self.device),
-                    grid_thw=image_grid_thw.to(self.device),
-                    output_hidden_states=True,
-                )
-
-                # Process each layer's hidden states
-                for layer_idx, layer_hidden_state in enumerate(all_hidden_states):
-                    layer_name = f"layer_{layer_idx}"
-
-                    if layer_name not in all_layers_embeddings:
-                        all_layers_embeddings[layer_name] = {}
-
-                    # Global average pooling across spatial dimensions
-                    # Qwen vision features are [batch_size, num_patches, hidden_size]
-                    pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
-
-                    # Store features for each image path
-                    for j, path in enumerate(image_paths):
-                        all_layers_embeddings[layer_name][path] = pooled_features[j]
-
-        return all_layers_embeddings
-
-
-class VLLMQwenFeatureExtractor(BaseFeatureExtractor):
-    """Feature extractor for Qwen2.5-VL using VLLM for high-throughput batch processing."""
-
-    def __init__(
-        self,
-        model_name=None,
-        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
-        batch_size=32,
-        device="auto",
-        extract_language=False,
-        tower_name=None,
-        projection_name=None,
-    ):
-        """
-        Initialize VLLM-based Qwen2.5-VL feature extractor.
-
-        Args:
-            model_name: Name for the model (for saving features)
-            model_path: HuggingFace model path
-            batch_size: Batch size for VLLM inference
-            device: Device to run on (handled by VLLM)
-        """
-        super().__init__(device)
-        self.model_name = model_name or Path(model_path).stem
-        self.batch_size = batch_size
-        self.model_path = model_path
-
-        # Get model-specific VLLM configuration
-        self.vllm_config = self._get_model_config(model_path)
-
-        # Initialize VLLM model
-        logging.info(f"Loading VLLM model: {model_path}")
-        logging.info(f"VLLM config: {self.vllm_config}")
-        self.llm = LLM(model=model_path, **self.vllm_config)
-
-        # Access the underlying vision model for feature extraction
-        self.vision_model = self._get_vision_model()
-
-        logging.info(f"Loaded VLLM Qwen2.5-VL model from {model_path}")
-
-    def _get_model_config(self, model_path: str) -> dict:
-        """Get model-specific VLLM configuration."""
-        model_name_lower = model_path.lower()
-
-        if "qwen2.5-vl" in model_name_lower or "qwen2_5" in model_name_lower:
-            return {
-                "max_model_len": 4096,
-                "max_num_seqs": max(
-                    1, self.batch_size // 4
-                ),  # Adjust based on batch size
-                "mm_processor_kwargs": {
-                    "min_pixels": 28 * 28,
-                    "max_pixels": 1280 * 28 * 28,
-                },
-                "limit_mm_per_prompt": {"image": 1},
-                "trust_remote_code": True,
-            }
-        else:
-            return {
-                "max_model_len": 4096,
-                "limit_mm_per_prompt": {"image": 1},
-                "trust_remote_code": True,
-            }
-
-    def _get_vision_model(self):
-        """Access the vision model from VLLM's internal structure."""
-        try:
-            # Try different VLLM internal structures based on version
-            llm_engine = self.llm.llm_engine
-            
-            # Try newer VLLM structure first
-            if hasattr(llm_engine, 'engine'):
-                engine = llm_engine.engine
-                if hasattr(engine, 'model_executor'):
-                    model_executor = engine.model_executor
-                elif hasattr(engine, 'worker'):
-                    # Single worker case
-                    worker = engine.worker
-                    model = worker.model
-                else:
-                    raise AttributeError("Could not find model executor in engine")
-            elif hasattr(llm_engine, 'model_executor'):
-                # Older VLLM structure
-                model_executor = llm_engine.model_executor
-            else:
-                # Try direct access to worker
-                if hasattr(llm_engine, 'worker'):
-                    worker = llm_engine.worker
-                    model = worker.model
-                else:
-                    raise AttributeError("Could not find model executor or worker")
-            
-            # Get worker and model if we have model_executor
-            if 'model_executor' in locals():
-                if hasattr(model_executor, "driver_worker"):
-                    # Single GPU case
-                    worker = model_executor.driver_worker
-                elif hasattr(model_executor, "workers"):
-                    # Multi GPU case - get first worker
-                    worker = list(model_executor.workers.values())[0]
-                else:
-                    raise AttributeError("Could not find worker in model executor")
-                
-                # Get the actual model
-                model = worker.model_runner.model if hasattr(worker, 'model_runner') else worker.model
-
-            # Access the vision encoder
-            if hasattr(model, "model") and hasattr(model.model, "visual"):
-                vision_model = model.model.visual
-                vision_model.eval()
-                return vision_model
-            elif hasattr(model, "visual"):
-                vision_model = model.visual
-                vision_model.eval()
-                return vision_model
-            else:
-                # Log model structure for debugging
-                logging.error(f"Model structure: {type(model)}")
-                if hasattr(model, '__dict__'):
-                    logging.error(f"Model attributes: {list(model.__dict__.keys())}")
-                raise AttributeError("Could not find vision model in VLLM structure")
-
-        except Exception as e:
-            logging.error(f"Failed to access vision model from VLLM: {e}")
-            # Try to provide more debugging info
-            logging.error(f"LLM engine type: {type(self.llm.llm_engine)}")
-            if hasattr(self.llm.llm_engine, '__dict__'):
-                logging.error(f"LLM engine attributes: {list(self.llm.llm_engine.__dict__.keys())}")
-            raise
-
-    def _create_vllm_prompts(self, image_paths: list) -> list:
-        """Create VLLM-compatible prompts for feature extraction."""
-        # Simple prompt for feature extraction (we just need to process the images)
-        prompt_text = (
-            "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-            "<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
-
-        vllm_prompts = []
-        for image_path in image_paths:
-            vllm_prompt = {
-                "prompt": prompt_text,
-                "multi_modal_data": {"image": Image.open(image_path).convert("RGB")},
-            }
-            vllm_prompts.append(vllm_prompt)
-
-        return vllm_prompts
-
-    def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
-        """
-        Extract features from all vision layers using VLLM for efficient processing.
-        """
-        logging.info(
-            f"Extracting features from all layers of {self.model_name} using VLLM..."
-        )
-
-        # Dictionary to store all layer embeddings: {layer_name: {image_path: features}}
-        all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
-
-        # Create sampling params (we don't actually need the generated text)
-        sampling_params = SamplingParams(
-            temperature=0.0,
-            max_tokens=1,  # Minimal tokens since we only need features
-            stop_token_ids=None,
-        )
-
-        # Process dataset in batches using VLLM
-        num_samples = len(dataset)
-        for i in tqdm(
-            range(0, num_samples, self.batch_size),
-            desc="Extracting VLLM Qwen Vision Features",
-            unit="batch",
-        ):
-            batch_end = min(i + self.batch_size, num_samples)
-            batch_data = dataset.select(range(i, batch_end))
-
-            # Get image paths
-            image_paths = [sample["image_path"] for sample in batch_data]
-
-            # Create VLLM prompts
-            vllm_prompts = self._create_vllm_prompts(image_paths)
+        # Process one image at a time
+        for i in tqdm(range(len(dataset)), desc="Extracting Full Model Features"):
+            sample = dataset[i]
+            image_path = sample["image_path"]
 
             try:
-                with torch.no_grad():
-                    # Use VLLM to process the batch (this handles all preprocessing efficiently)
-                    # We'll intercept at the vision model level to get features
-                    self._extract_batch_features(
-                        vllm_prompts, image_paths, all_layers_embeddings
-                    )
-
+                self._extract_single_image_features(image_path, all_layers_embeddings)
             except Exception as e:
-                logging.error(f"Error processing batch {i}-{batch_end}: {e}")
-                # Continue with next batch
+                logging.error(f"Error processing {image_path}: {e}")
                 continue
 
         return all_layers_embeddings
 
-    def _extract_batch_features(
-        self, vllm_prompts: list, image_paths: list, all_layers_embeddings: dict
+    def _extract_single_image_features(
+        self, image_path: str, all_layers_embeddings: dict
     ):
-        """Extract features from a batch using VLLM's internal processing."""
-
-        try:
-            # Extract images from prompts
-            images = [prompt["multi_modal_data"]["image"] for prompt in vllm_prompts]
-            texts = [prompt["prompt"] for prompt in vllm_prompts]
-
-            # Try to get processor from VLLM's internal structure
-            processor = None
-            try:
-                # Try different ways to access the processor
-                llm_engine = self.llm.llm_engine
-                
-                if hasattr(llm_engine, 'engine'):
-                    engine = llm_engine.engine
-                    if hasattr(engine, 'worker'):
-                        worker = engine.worker
-                        if hasattr(worker, 'model') and hasattr(worker.model, 'processor'):
-                            processor = worker.model.processor
-                elif hasattr(llm_engine, 'worker'):
-                    worker = llm_engine.worker
-                    if hasattr(worker, 'model') and hasattr(worker.model, 'processor'):
-                        processor = worker.model.processor
-                elif hasattr(llm_engine, 'model_executor'):
-                    model_executor = llm_engine.model_executor
-                    if hasattr(model_executor, "driver_worker"):
-                        worker = model_executor.driver_worker
-                    else:
-                        worker = list(model_executor.workers.values())[0]
-                    
-                    if hasattr(worker, 'model_runner') and hasattr(worker.model_runner, 'model'):
-                        if hasattr(worker.model_runner.model, 'processor'):
-                            processor = worker.model_runner.model.processor
-                
-                if processor is None:
-                    # Fallback: create processor directly
-                    from transformers import AutoProcessor
-                    processor = AutoProcessor.from_pretrained(self.model_path)
-                    
-            except Exception as e:
-                logging.warning(f"Could not access VLLM processor, using fallback: {e}")
-                from transformers import AutoProcessor
-                processor = AutoProcessor.from_pretrained(self.model_path)
-
-            # Process through the processor
-            inputs = processor(
-                text=texts, images=images, return_tensors="pt", padding=True
+        image = Image.open(image_path).convert("RGB")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": " "},
+                ],
+            }
+        ]
+        # Apply chat template
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.processor(text=[text], images=[image], return_tensors="pt")
+        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            # Forward pass with output_hidden_states=True
+            outputs = self.model(
+                **inputs,
+                output_hidden_states=True,
+                return_dict=True
             )
 
-            # Move to appropriate device
-            device = next(self.vision_model.parameters()).device
-            pixel_values = inputs["pixel_values"].to(device)
-            image_grid_thw = inputs["image_grid_thw"].to(device)
+            # Extract vision features (from vision encoder)
+            if hasattr(outputs, 'vision_hidden_states') and outputs.vision_hidden_states:
+                vision_hidden_states = outputs.vision_hidden_states
+                for layer_idx, layer_hidden_state in enumerate(vision_hidden_states):
+                    layer_name = f"vision_layer_{layer_idx}"
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
 
-            # Extract features using the vision model
-            pixel_values = pixel_values.type(self.vision_model.dtype)
-            final_hidden_states, all_hidden_states = self.vision_model(
-                pixel_values, grid_thw=image_grid_thw, output_hidden_states=True
-            )
+                    # Global average pooling
+                    pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+                    all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
-            # Process each layer's hidden states
-            for layer_idx, layer_hidden_state in enumerate(all_hidden_states):
-                layer_name = f"layer_{layer_idx}"
+              # Extract language features (from language model)
+              if hasattr(outputs, 'hidden_states') and outputs.hidden_states:
+                  language_hidden_states = outputs.hidden_states
+                  for layer_idx, layer_hidden_state in enumerate(language_hidden_states):
+                      layer_name = f"language_layer_{layer_idx}"
+                      if layer_name not in all_layers_embeddings:
+                          all_layers_embeddings[layer_name] = {}
 
-                if layer_name not in all_layers_embeddings:
-                    all_layers_embeddings[layer_name] = {}
+                      # Average over sequence length
+                      pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+                      all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
-                # Global average pooling across spatial dimensions
-                pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+              # Extract multimodal fusion features (if available)
+              if hasattr(outputs, 'last_hidden_state'):
+                  layer_name = "multimodal_final"
+                  if layer_name not in all_layers_embeddings:
+                      all_layers_embeddings[layer_name] = {}
 
-                # Store features for each image path
-                for j, path in enumerate(image_paths):
-                    all_layers_embeddings[layer_name][path] = pooled_features[j]
-
-        except Exception as e:
-            logging.error(f"Error in _extract_batch_features: {e}")
-            raise
+                  pooled_features = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+                  all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
 
 def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor:
@@ -841,8 +558,7 @@ def get_feature_extractor(extractor_type: str, **kwargs) -> BaseFeatureExtractor
         "dinov2": FeatureExtractor,
         "clip": FeatureExtractor,
         "llava": LlavaFeatureExtractor,
-        # "qwen2.5-vl": QwenFeatureExtractor,
-        "qwen2.5-vl": VLLMQwenFeatureExtractor,
+        "qwen2.5-vl": QwenFeatureExtractor,
     }
 
     if extractor_type not in extractors:

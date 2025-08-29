@@ -30,7 +30,13 @@ def get_model_config(model_name: str) -> dict:
     """Get model-specific VLLM configuration."""
     model_name_lower = model_name.lower()
 
-    if "paligemma" in model_name_lower:
+    if "paligemma2" in model_name_lower:
+        return {
+            "max_model_len": 2048,
+            "limit_mm_per_prompt": {"image": 1},
+            "trust_remote_code": True,
+        }
+    elif "paligemma" in model_name_lower:
         return {
             "max_model_len": 2048,
             "limit_mm_per_prompt": {"image": 1},
@@ -60,7 +66,10 @@ def create_vllm_prompts_batch(
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
 
     # Model-specific prompt formats
-    if "qwen2.5-vl" in model_name:
+    if "paligemma2" in model_name:
+        # PaliGemma2 uses task-specific prefixes
+        prompt_text = f"answer {question}"
+    elif "qwen2.5-vl" in model_name:
         # Qwen2.5-VL format
         prompt_text = (
             "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
