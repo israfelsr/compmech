@@ -67,8 +67,8 @@ def create_vllm_prompts_batch(
 
     # Model-specific prompt formats
     if "paligemma2" in model_name:
-        # PaliGemma2 uses task-specific prefixes
-        prompt_text = f"<image>\n{question}"
+        # PaliGemma2 expects <image> token at the beginning as per the warning
+        prompt_text = f"<image>{question}"
     elif "qwen2.5-vl" in model_name:
         # Qwen2.5-VL format
         prompt_text = (

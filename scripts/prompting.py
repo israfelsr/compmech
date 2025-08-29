@@ -4,19 +4,26 @@ import argparse
 import logging
 from pathlib import Path
 from datasets import load_from_disk
-from transformers import AutoProcessor, AutoModelForImageTextToText
-import torch
 from PIL import Image
 from tqdm import tqdm
 import sys
 import os
+import torch
 
 # Disable tokenizers parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Add src to path to import utilities
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+# Add project root to path to import utilities
+sys.path.append(str(Path(__file__).parent.parent))
 from src.utils.logging_utils import setup_logging
+
+# Transformers imports
+from transformers import (
+    PaliGemmaProcessor,
+    PaliGemmaForConditionalGeneration,
+    AutoProcessor,
+    AutoModelForImageTextToText,
+)
 
 
 def load_config(config_path: str) -> dict:
@@ -25,182 +32,163 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def get_model_and_processor(model_path: str, model_type: str):
+    """Load model and processor based on model type."""
+    if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
+        model = PaliGemmaForConditionalGeneration.from_pretrained(
+            model_path, 
+            torch_dtype=torch.bfloat16, 
+            device_map="auto"
+        ).eval()
+        processor = PaliGemmaProcessor.from_pretrained(model_path)
+        return model, processor
+    else:
+        # Generic fallback for other vision-language models
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_path, 
+            torch_dtype=torch.bfloat16, 
+            device_map="auto"
+        ).eval()
+        processor = AutoProcessor.from_pretrained(model_path)
+        return model, processor
+
+
+def create_prompt(attribute_name: str, model_type: str) -> str:
+    """Create model-specific prompt for attribute classification."""
+    question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
+    
+    if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
+        # PaliGemma expects simple prompt format
+        return question
+    elif "qwen2.5-vl" in model_type.lower():
+        # Qwen2.5-VL format
+        return f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
+    else:
+        # Default format
+        return question
+
+
+def process_single_sample(
+    model, processor, image_path: str, attribute_name: str, 
+    label: int, model_type: str, max_tokens: int = 10
+) -> dict:
+    """Process a single image-attribute pair."""
+    try:
+        # Load image
+        image = Image.open(image_path).convert("RGB")
+        
+        # Create prompt
+        prompt = create_prompt(attribute_name, model_type)
+        
+        # Process inputs
+        model_inputs = processor(
+            text=prompt, 
+            images=image, 
+            return_tensors="pt"
+        ).to(model.device)
+        
+        # Convert to appropriate dtype
+        if hasattr(model_inputs, 'pixel_values'):
+            model_inputs['pixel_values'] = model_inputs['pixel_values'].to(torch.bfloat16)
+        
+        input_len = model_inputs["input_ids"].shape[-1]
+        
+        # Generate response
+        with torch.inference_mode():
+            generation = model.generate(
+                **model_inputs, 
+                max_new_tokens=max_tokens, 
+                do_sample=False,
+                temperature=0.0,
+                pad_token_id=processor.tokenizer.eos_token_id
+            )
+            generation = generation[0][input_len:]
+            decoded = processor.decode(generation, skip_special_tokens=True).strip()
+        
+        return {
+            "image_path": image_path,
+            "attribute": attribute_name,
+            "prompt": prompt,
+            "response": decoded,
+            "label": label,
+        }
+    
+    except Exception as e:
+        logging.error(f"Error processing {image_path} with attribute {attribute_name}: {e}")
+        return {
+            "image_path": image_path,
+            "attribute": attribute_name,
+            "prompt": prompt if 'prompt' in locals() else "",
+            "response": "",
+            "label": label,
+        }
+
+
+def process_samples_for_attribute(
+    model, processor, dataset, attribute_name: str, 
+    model_type: str, max_tokens: int = 10
+):
+    """Process all samples for a specific attribute."""
+    results = []
+    
+    for sample in tqdm(dataset, desc=f"Processing {attribute_name}"):
+        result = process_single_sample(
+            model, processor,
+            sample["image_path"],
+            attribute_name,
+            sample[attribute_name],
+            model_type,
+            max_tokens
+        )
+        results.append(result)
+    
+    return results
+
+
 def main(args):
     # Load configuration
     config = load_config(args.config)
     logging.info(f"Loaded configuration from {args.config}")
 
-    # Setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using device: {device}")
-
     # Load dataset
-    dataset_path = args.dataset_path or config["dataset"]["path"]
+    dataset_path = config["dataset"]["path"]
     dataset = load_from_disk(dataset_path)
     logging.info(f"Loaded dataset with {len(dataset)} samples")
 
-    # Processing
+    # Get model configuration
     model_config = config["model"]
-    processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
+    model_path = model_config["model_path"]
+    model_type = model_config.get("type", "unknown")
+    max_tokens = model_config.get("max_tokens", 10)
 
-    # Create prompt templates
-    prompt_template = "USER: Image: <image>\nQuestion: Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'.\nASSISTANT:"
+    # Load model and processor
+    logging.info(f"Loading model: {model_path}")
+    model, processor = get_model_and_processor(model_path, model_type)
+    logging.info(f"Model loaded successfully on device: {model.device}")
 
     # Get attribute(s) from config or args
     specific_attribute = args.attribute or config["probe"].get("specific_attribute")
-
+    
     if specific_attribute:
         # Single attribute mode
-        attributes_to_process = specific_attribute
-        logging.info(f"Processing single attribute: {specific_attribute}")
+        if isinstance(specific_attribute, str):
+            attributes_to_process = [specific_attribute]
+        else:
+            attributes_to_process = specific_attribute
+        logging.info(f"Processing specific attributes: {attributes_to_process}")
     else:
         # All attributes mode
-        attributes_to_process = list(dataset[0].keys())[2:]
+        attributes_to_process = list(dataset[0].keys())[2:]  # Skip image_path and any metadata
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
 
-    def process_text():
-        image = Image.open(dataset[0]["image_path"]).convert("RGB")
-        texts = [
-            prompt_template.format(attribute_name=attr)
-            for attr in attributes_to_process
-        ]
-        inputs = processor(images=image, text=texts, return_tensors="pt", padding=True)
-        result = {}
-        for key, value in inputs.items():
-            result[key] = value
-        return result
-
-    prompts = process_text()
-
-    def preprocess_images(
-        examples,
-    ):
-        """
-        Loads images from paths and processes them using the given processor.
-        This function is designed to be mapped over a HuggingFace Dataset.
-        """
-        image_paths = examples["image_path"]
-
-        images = [Image.open(path).convert("RGB") for path in image_paths]
-        text = ["<image>"] * len(images)
-        inputs = processor(images=images, text=text, return_tensors="pt")
-        result = {"image_path": image_paths}
-        for key, value in inputs.items():
-            result[key] = value
-        return result
-
-    image_dataset = dataset.map(
-        preprocess_images,
-        batched=True,
-        load_from_cache_file=True,
-        desc="Preprocessing Images",
-        num_proc=1,  # Disable multiprocessing to avoid tokenizer warnings
+    # Set up output directory
+    output_dir = Path(
+        args.output_dir or config["probe"].get("output_dir", "results/hf_inference")
     )
-
-    # Load model and processor
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_config["model_path"],
-        torch_dtype=torch.float16,
-        device_map=model_config["device"],
-    )
-
-    def process_samples_for_attribute(attr_idx):
-        """Process all samples for a specific attribute using batched inference."""
-        batch_size = model_config.get("batch_size", 16)
-        results = []
-
-        # Use DataLoader for proper batching
-        from torch.utils.data import DataLoader
-
-        def collate_fn(batch):
-            # batch is a list of dataset items
-            pixel_values = torch.stack([item["pixel_values"] for item in batch])
-            image_paths = [item["image_path"] for item in batch]
-            return {"pixel_values": pixel_values, "image_path": image_paths}
-
-        image_dataset.set_format(
-            type="torch",
-            columns=["pixel_values", "image_path"],
-        )
-
-        dataloader = DataLoader(
-            image_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=0,  # Disable multiprocessing to avoid tokenizer warnings
-        )
-
-        for batch in tqdm(dataloader, desc=f"Processing {attribute_name} batches"):
-            batch_pixel_values = batch["pixel_values"].to(device)
-            batch_image_paths = batch["image_path"]
-
-            # Repeat text inputs for batch size
-            batch_size_actual = batch_pixel_values.shape[0]
-            batch_input_ids = (
-                prompts["input_ids"][attr_idx].repeat(batch_size_actual, 1).to(device)
-            )
-            batch_attention_mask = (
-                prompts["attention_mask"][attr_idx]
-                .repeat(batch_size_actual, 1)
-                .to(device)
-            )
-
-            model_inputs = {
-                "pixel_values": batch_pixel_values,
-                "input_ids": batch_input_ids,
-                "attention_mask": batch_attention_mask,
-            }
-
-            # Generate responses
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **model_inputs,
-                    max_new_tokens=100,
-                    do_sample=False,
-                )
-
-                # Decode responses
-                responses = processor.batch_decode(
-                    generated_ids[:, model_inputs["input_ids"].shape[1] :],
-                    skip_special_tokens=True,
-                )
-
-            # Collect results for this batch
-            for i, (image_path, response) in enumerate(
-                zip(batch_image_paths, responses)
-            ):
-                # Find original sample to get label
-                original_sample = None
-                for sample in dataset:
-                    if sample["image_path"] == image_path:
-                        original_sample = sample
-                        break
-
-                results.append(
-                    {
-                        "image_path": image_path,
-                        "attribute": attribute_name,
-                        "prompt": processor.decode(
-                            prompts["input_ids"][attr_idx], skip_special_tokens=True
-                        ),
-                        "response": response.strip(),
-                        "label": (
-                            original_sample.get(attribute_name, None)
-                            if original_sample
-                            else None
-                        ),
-                    }
-                )
-
-        return results
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Process all samples for each attribute
     all_results = {}
-    total_combinations = len(dataset) * len(attributes_to_process)
-    logging.info(
-        f"Processing {total_combinations} combinations ({len(dataset)} samples × {len(attributes_to_process)} attributes)..."
-    )
 
     for attr_idx, attribute_name in enumerate(attributes_to_process):
         logging.info(
@@ -208,83 +196,55 @@ def main(args):
         )
 
         try:
-            results = process_samples_for_attribute(attr_idx)
-            all_results[attribute_name] = results
-            logging.info(
-                f"Completed {attribute_name}: {len(results)} samples processed"
+            results = process_samples_for_attribute(
+                model, processor, dataset, attribute_name, model_type, max_tokens
             )
-        except Exception as e:
-            logging.error(f"Error processing attribute {attribute_name}: {e}")
-            all_results[attribute_name] = []  # Empty results for failed attribute
-            continue
+            all_results[attribute_name] = results
 
-    # Save results
-    output_dir = Path(
-        args.output_dir or config["probe"].get("output_dir", "results/prompting")
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if len(attributes_to_process) == 1:
-        # Single attribute: save as before
-        attribute_name = attributes_to_process[0]
-        results = all_results[attribute_name]
-        results_filename = f"prompting_results_{attribute_name}_{args.prompt_type}.json"
-        results_path = output_dir / results_filename
-
-        with open(results_path, "w") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-
-        logging.info(f"Results saved to {results_path}")
-        logging.info(f"Processed {len(results)} samples successfully")
-    else:
-        # Multiple attributes: save separate files and a combined file
-        total_samples = 0
-        for attribute_name, results in all_results.items():
-            results_filename = f"prompting_results_{attribute_name}.json"
+            # Save individual attribute results immediately
+            results_filename = f"hf_inference_results_{attribute_name}.json"
             results_path = output_dir / results_filename
 
             with open(results_path, "w") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
 
-            total_samples += len(results)
             logging.info(
-                f"Saved {attribute_name}: {len(results)} samples -> {results_path}"
+                f"Completed {attribute_name}: {len(results)} samples processed -> saved to {results_path}"
             )
 
-        # Save combined results
-        combined_filename = f"prompting_results_all_{args.prompt_type}.json"
+        except Exception as e:
+            logging.error(f"Error processing attribute {attribute_name}: {e}")
+            continue
+
+    # Save combined results if multiple attributes
+    if len(attributes_to_process) > 1:
+        combined_filename = f"hf_inference_results_all.json"
         combined_path = output_dir / combined_filename
 
         with open(combined_path, "w") as f:
             json.dump(all_results, f, indent=2, ensure_ascii=False)
 
+        total_samples = sum(len(results) for results in all_results.values())
         logging.info(f"Combined results saved to {combined_path}")
         logging.info(
             f"Processed {len(attributes_to_process)} attributes with {total_samples} total samples"
         )
+    else:
+        # Single attribute case
+        if attributes_to_process[0] in all_results:
+            total_samples = len(all_results[attributes_to_process[0]])
+            logging.info(f"Processed {total_samples} samples successfully")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Prompt LLAVA model with images and save responses"
-    )
+    parser = argparse.ArgumentParser(description="Inference with Vision-Language models using Hugging Face Transformers")
     parser.add_argument(
         "--config", type=str, required=True, help="Path to configuration YAML file"
-    )
-    parser.add_argument(
-        "--dataset-path", type=str, help="Override dataset path from config"
     )
     parser.add_argument(
         "--attribute",
         type=str,
         help="Specific attribute to prompt about. If not provided, processes all attributes in dataset",
-    )
-    parser.add_argument(
-        "--prompt-type",
-        type=str,
-        choices=["default", "taxonomic", "visual", "functional"],
-        default="default",
-        help="Type of prompt template to use",
     )
     parser.add_argument("--output-dir", type=str, help="Output directory for results")
 
