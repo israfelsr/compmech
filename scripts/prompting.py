@@ -36,30 +36,26 @@ def get_model_and_processor(model_path: str, model_type: str):
     """Load model and processor based on model type."""
     if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
         model = PaliGemmaForConditionalGeneration.from_pretrained(
-            model_path, 
-            torch_dtype=torch.bfloat16, 
-            device_map="auto"
+            model_path, torch_dtype=torch.bfloat16, device_map="auto"
         ).eval()
-        processor = PaliGemmaProcessor.from_pretrained(model_path)
+        processor = PaliGemmaProcessor.from_pretrained(model_path, use_fast=True)
         return model, processor
     else:
         # Generic fallback for other vision-language models
         model = AutoModelForImageTextToText.from_pretrained(
-            model_path, 
-            torch_dtype=torch.bfloat16, 
-            device_map="auto"
+            model_path, torch_dtype=torch.bfloat16, device_map="auto"
         ).eval()
-        processor = AutoProcessor.from_pretrained(model_path)
+        processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
         return model, processor
 
 
 def create_prompt(attribute_name: str, model_type: str) -> str:
     """Create model-specific prompt for attribute classification."""
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
-    
+
     if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
         # PaliGemma expects simple prompt format
-        return question
+        return f"Image: <image>\n{question}"
     elif "qwen2.5-vl" in model_type.lower():
         # Qwen2.5-VL format
         return f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
@@ -69,42 +65,46 @@ def create_prompt(attribute_name: str, model_type: str) -> str:
 
 
 def process_single_sample(
-    model, processor, image_path: str, attribute_name: str, 
-    label: int, model_type: str, max_tokens: int = 10
+    model,
+    processor,
+    image_path: str,
+    attribute_name: str,
+    label: int,
+    model_type: str,
+    max_tokens: int = 10,
 ) -> dict:
     """Process a single image-attribute pair."""
     try:
         # Load image
         image = Image.open(image_path).convert("RGB")
-        
+
         # Create prompt
         prompt = create_prompt(attribute_name, model_type)
-        
+
         # Process inputs
-        model_inputs = processor(
-            text=prompt, 
-            images=image, 
-            return_tensors="pt"
-        ).to(model.device)
-        
+        model_inputs = processor(text=prompt, images=image, return_tensors="pt").to(
+            model.device
+        )
+
         # Convert to appropriate dtype
-        if hasattr(model_inputs, 'pixel_values'):
-            model_inputs['pixel_values'] = model_inputs['pixel_values'].to(torch.bfloat16)
-        
+        if hasattr(model_inputs, "pixel_values"):
+            model_inputs["pixel_values"] = model_inputs["pixel_values"].to(
+                torch.bfloat16
+            )
+
         input_len = model_inputs["input_ids"].shape[-1]
-        
+
         # Generate response
         with torch.inference_mode():
             generation = model.generate(
-                **model_inputs, 
-                max_new_tokens=max_tokens, 
+                **model_inputs,
+                max_new_tokens=max_tokens,
                 do_sample=False,
-                temperature=0.0,
-                pad_token_id=processor.tokenizer.eos_token_id
+                pad_token_id=processor.tokenizer.eos_token_id,
             )
             generation = generation[0][input_len:]
             decoded = processor.decode(generation, skip_special_tokens=True).strip()
-        
+
         return {
             "image_path": image_path,
             "attribute": attribute_name,
@@ -112,36 +112,43 @@ def process_single_sample(
             "response": decoded,
             "label": label,
         }
-    
+
     except Exception as e:
-        logging.error(f"Error processing {image_path} with attribute {attribute_name}: {e}")
+        logging.error(
+            f"Error processing {image_path} with attribute {attribute_name}: {e}"
+        )
         return {
             "image_path": image_path,
             "attribute": attribute_name,
-            "prompt": prompt if 'prompt' in locals() else "",
+            "prompt": prompt if "prompt" in locals() else "",
             "response": "",
             "label": label,
         }
 
 
 def process_samples_for_attribute(
-    model, processor, dataset, attribute_name: str, 
-    model_type: str, max_tokens: int = 10
+    model,
+    processor,
+    dataset,
+    attribute_name: str,
+    model_type: str,
+    max_tokens: int = 10,
 ):
     """Process all samples for a specific attribute."""
     results = []
-    
+
     for sample in tqdm(dataset, desc=f"Processing {attribute_name}"):
         result = process_single_sample(
-            model, processor,
+            model,
+            processor,
             sample["image_path"],
             attribute_name,
             sample[attribute_name],
             model_type,
-            max_tokens
+            max_tokens,
         )
         results.append(result)
-    
+
     return results
 
 
@@ -168,7 +175,7 @@ def main(args):
 
     # Get attribute(s) from config or args
     specific_attribute = args.attribute or config["probe"].get("specific_attribute")
-    
+
     if specific_attribute:
         # Single attribute mode
         if isinstance(specific_attribute, str):
@@ -178,7 +185,9 @@ def main(args):
         logging.info(f"Processing specific attributes: {attributes_to_process}")
     else:
         # All attributes mode
-        attributes_to_process = list(dataset[0].keys())[2:]  # Skip image_path and any metadata
+        attributes_to_process = list(dataset[0].keys())[
+            2:
+        ]  # Skip image_path and any metadata
         logging.info(f"Processing all {len(attributes_to_process)} attributes")
 
     # Set up output directory
@@ -237,7 +246,9 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inference with Vision-Language models using Hugging Face Transformers")
+    parser = argparse.ArgumentParser(
+        description="Inference with Vision-Language models using Hugging Face Transformers"
+    )
     parser.add_argument(
         "--config", type=str, required=True, help="Path to configuration YAML file"
     )
