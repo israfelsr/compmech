@@ -514,14 +514,13 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
         with torch.no_grad():
             # Forward pass with output_hidden_states=True
-            outputs = self.model(
-                **inputs,
-                output_hidden_states=True,
-                return_dict=True
-            )
+            outputs = self.model(**inputs, output_hidden_states=True, return_dict=True)
 
             # Extract vision features (from vision encoder)
-            if hasattr(outputs, 'vision_hidden_states') and outputs.vision_hidden_states:
+            if (
+                hasattr(outputs, "vision_hidden_states")
+                and outputs.vision_hidden_states
+            ):
                 vision_hidden_states = outputs.vision_hidden_states
                 for layer_idx, layer_hidden_state in enumerate(vision_hidden_states):
                     layer_name = f"vision_layer_{layer_idx}"
@@ -532,26 +531,26 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                     pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
                     all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
-              # Extract language features (from language model)
-              if hasattr(outputs, 'hidden_states') and outputs.hidden_states:
-                  language_hidden_states = outputs.hidden_states
-                  for layer_idx, layer_hidden_state in enumerate(language_hidden_states):
-                      layer_name = f"language_layer_{layer_idx}"
-                      if layer_name not in all_layers_embeddings:
-                          all_layers_embeddings[layer_name] = {}
+            # Extract language features (from language model)
+            if hasattr(outputs, "hidden_states") and outputs.hidden_states:
+                language_hidden_states = outputs.hidden_states
+                for layer_idx, layer_hidden_state in enumerate(language_hidden_states):
+                    layer_name = f"language_layer_{layer_idx}"
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
 
-                      # Average over sequence length
-                      pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
-                      all_layers_embeddings[layer_name][image_path] = pooled_features[0]
+                    # Average over sequence length
+                    pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+                    all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
-              # Extract multimodal fusion features (if available)
-              if hasattr(outputs, 'last_hidden_state'):
-                  layer_name = "multimodal_final"
-                  if layer_name not in all_layers_embeddings:
-                      all_layers_embeddings[layer_name] = {}
+            # Extract multimodal fusion features (if available)
+            if hasattr(outputs, "last_hidden_state"):
+                layer_name = "multimodal_final"
+                if layer_name not in all_layers_embeddings:
+                    all_layers_embeddings[layer_name] = {}
 
-                  pooled_features = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
-                  all_layers_embeddings[layer_name][image_path] = pooled_features[0]
+                pooled_features = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+                all_layers_embeddings[layer_name][image_path] = pooled_features[0]
 
 
 class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
@@ -597,10 +596,10 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
         """
         image_paths = examples["image_path"]
         images = [Image.open(path).convert("RGB") for path in image_paths]
-        
+
         # Use only "<image>" as text prompt - no additional text
         text = ["<image>"] * len(images)
-        
+
         inputs = self.processor(text=text, images=images, return_tensors="pt")
         result = {"image_path": image_paths}
         for key, value in inputs.items():
@@ -628,11 +627,11 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
             load_from_cache_file=True,
             desc="Preprocessing Images for PaliGemma",
         )
-        
+
         # Set format for torch dataloader
         processed_dataset.set_format(
-            type="torch", 
-            columns=["pixel_values", "input_ids", "attention_mask", "image_path"]
+            type="torch",
+            columns=["pixel_values", "input_ids", "attention_mask", "image_path"],
         )
 
         dataloader = DataLoader(
@@ -649,34 +648,51 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                     "input_ids": batch["input_ids"].to(self.model.device),
                     "attention_mask": batch["attention_mask"].to(self.model.device),
                 }
-                
+
                 batch_image_paths: List[str] = [
                     p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
                 ]
-                
+
                 # Forward pass with hidden states
-                outputs = self.model(**inputs, output_hidden_states=True, return_dict=True)
+                outputs = self.model(
+                    **inputs, output_hidden_states=True, return_dict=True
+                )
 
                 # Extract vision encoder features
-                if hasattr(outputs, 'vision_outputs') and outputs.vision_outputs is not None:
+                if (
+                    hasattr(outputs, "vision_outputs")
+                    and outputs.vision_outputs is not None
+                ):
                     vision_outputs = outputs.vision_outputs
-                    if hasattr(vision_outputs, 'hidden_states'):
+                    if hasattr(vision_outputs, "hidden_states"):
                         vision_hidden_states = vision_outputs.hidden_states
-                        for layer_idx, layer_hidden_state in enumerate(vision_hidden_states):
+                        for layer_idx, layer_hidden_state in enumerate(
+                            vision_hidden_states
+                        ):
                             layer_name = f"vision_layer_{layer_idx}"
                             if layer_name not in all_layers_embeddings:
                                 all_layers_embeddings[layer_name] = {}
 
                             # Global average pooling over spatial dimensions
-                            pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
-                            
+                            pooled_features = (
+                                layer_hidden_state.mean(dim=1).cpu().numpy()
+                            )
+
                             for i, path in enumerate(batch_image_paths):
-                                all_layers_embeddings[layer_name][path] = pooled_features[i]
+                                all_layers_embeddings[layer_name][path] = (
+                                    pooled_features[i]
+                                )
 
                 # Extract language model features if enabled
-                if self.extract_language and hasattr(outputs, 'hidden_states') and outputs.hidden_states:
+                if (
+                    self.extract_language
+                    and hasattr(outputs, "hidden_states")
+                    and outputs.hidden_states
+                ):
                     language_hidden_states = outputs.hidden_states
-                    for layer_idx, layer_hidden_state in enumerate(language_hidden_states):
+                    for layer_idx, layer_hidden_state in enumerate(
+                        language_hidden_states
+                    ):
                         layer_name = f"language_layer_{layer_idx}"
                         if layer_name not in all_layers_embeddings:
                             all_layers_embeddings[layer_name] = {}
@@ -686,14 +702,19 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                         attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
                         masked_hidden_states = layer_hidden_state * attention_mask
                         pooled_features = (
-                            masked_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)
-                        ).cpu().numpy()
-                        
+                            (
+                                masked_hidden_states.sum(dim=1)
+                                / attention_mask.sum(dim=1)
+                            )
+                            .cpu()
+                            .numpy()
+                        )
+
                         for i, path in enumerate(batch_image_paths):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
 
                 # Extract final multimodal representation
-                if hasattr(outputs, 'last_hidden_state'):
+                if hasattr(outputs, "last_hidden_state"):
                     layer_name = "multimodal_final"
                     if layer_name not in all_layers_embeddings:
                         all_layers_embeddings[layer_name] = {}
@@ -701,9 +722,11 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                     attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
                     masked_hidden_states = outputs.last_hidden_state * attention_mask
                     pooled_features = (
-                        masked_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)
-                    ).cpu().numpy()
-                    
+                        (masked_hidden_states.sum(dim=1) / attention_mask.sum(dim=1))
+                        .cpu()
+                        .numpy()
+                    )
+
                     for i, path in enumerate(batch_image_paths):
                         all_layers_embeddings[layer_name][path] = pooled_features[i]
 
