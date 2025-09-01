@@ -31,14 +31,12 @@ def get_model_config(model_name: str) -> dict:
     model_name_lower = model_name.lower()
 
     if "paligemma2" in model_name_lower:
+        # return {
+        #     "max_model_len": 2048,
+        #     "limit_mm_per_prompt": {"image": 1},
+        #     "trust_remote_code": True,
+        # }
         return {
-            "max_model_len": 2048,
-            "limit_mm_per_prompt": {"image": 1},
-            "trust_remote_code": True,
-        }
-    elif "paligemma" in model_name_lower:
-        return {
-            "max_model_len": 2048,
             "limit_mm_per_prompt": {"image": 1},
         }
     elif "qwen2.5-vl" in model_name_lower or "qwen2_5" in model_name_lower:
@@ -68,7 +66,7 @@ def create_vllm_prompts_batch(
     # Model-specific prompt formats
     if "paligemma2" in model_name:
         # PaliGemma2 expects <image> token at the beginning as per the warning
-        prompt_text = f"<image>{question}"
+        prompt_text = f"answer en {question}\n"
     elif "qwen2.5-vl" in model_name:
         # Qwen2.5-VL format
         prompt_text = (
@@ -77,9 +75,6 @@ def create_vllm_prompts_batch(
             f"{question}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
-    elif "paligemma" in model_name:
-        # PaliGemma uses special format for VQA - we'll adapt it for attribute checking
-        prompt_text = f"<image>\n{question}"
     else:
         # Default format (for other models)
         prompt_text = f"<image>\n{question}"
