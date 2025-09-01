@@ -665,7 +665,9 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                         all_layers_embeddings[layer_name] = {}
 
                         # Global average pooling over spatial dimensions
-                        pooled_features = layer_hidden_state.mean(dim=1).cpu().numpy()
+                        pooled_features = (
+                            layer_hidden_state.mean(dim=1).float().cpu().numpy()
+                        )
 
                         for i, path in enumerate(batch_image_paths):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
@@ -676,7 +678,7 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                 image_features = image_features / (
                     self.model.config.text_config.hidden_size**0.5
                 )
-                image_features = image_features.mean(dim=1).cpu().numpy()
+                image_features = image_features.mean(dim=1).float().cpu().numpy()
                 for i, path in enumerate(batch_image_paths):
                     all_layers_embeddings["layer_proj"][path] = image_features[i]
 
@@ -703,6 +705,7 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                                 masked_hidden_states.sum(dim=1)
                                 / attention_mask.sum(dim=1)
                             )
+                            .float()
                             .cpu()
                             .numpy()
                         )
