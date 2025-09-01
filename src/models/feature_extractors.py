@@ -679,6 +679,8 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                     self.model.config.text_config.hidden_size**0.5
                 )
                 image_features = image_features.mean(dim=1).float().cpu().numpy()
+                if "layer_proj" not in all_layers_embeddings:
+                    all_layers_embeddings["layer_proj"] = {}
                 for i, path in enumerate(batch_image_paths):
                     all_layers_embeddings["layer_proj"][path] = image_features[i]
 
