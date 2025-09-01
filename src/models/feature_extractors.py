@@ -664,13 +664,13 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
                     if layer_name not in all_layers_embeddings:
                         all_layers_embeddings[layer_name] = {}
 
-                        # Global average pooling over spatial dimensions
-                        pooled_features = (
-                            layer_hidden_state.mean(dim=1).float().cpu().numpy()
-                        )
+                    # Global average pooling over spatial dimensions
+                    pooled_features = (
+                        layer_hidden_state.mean(dim=1).float().cpu().numpy()
+                    )
 
-                        for i, path in enumerate(batch_image_paths):
-                            all_layers_embeddings[layer_name][path] = pooled_features[i]
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = pooled_features[i]
 
                 image_features = self.model.multi_modal_projector(
                     image_outputs.last_hidden_state

@@ -3,7 +3,7 @@
 #SBATCH --job-name=probe_layers
 #SBATCH --partition=lrd_all_serial
 #SBATCH --cpus-per-task=8       # 1/4 of 32 CPUs
-#SBATCH --mem=120G              # ~1/4 of total RAM (≈480 GB / 4)
+#SBATCH --mem=30G
 #SBATCH --time=04:00:00         # walltime (hh:mm:ss)
 #SBATCH --output=%x_%j.out
 #SBATCH --array=0-27%2
