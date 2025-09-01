@@ -1,17 +1,20 @@
+
 #!/bin/bash
-#SBATCH --job-name=probe_all_layers
-#SBATCH --output=logs/probe_layers_%A_%a.out
-#SBATCH --array=0-24%5
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
-#SBATCH --time=10:00:00
+#SBATCH --account EUHPC_D27_102
+#SBATCH --job-name=probe_layers
+#SBATCH --partition=lrd_all_serial
+#SBATCH --cpus-per-task=8       # 1/4 of 32 CPUs
+#SBATCH --mem=120G              # ~1/4 of total RAM (≈480 GB / 4)
+#SBATCH --time=04:00:00         # walltime (hh:mm:ss)
+#SBATCH --output=%x_%j.out
+#SBATCH --array=0-27%2
 
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
 # Define the layers to process (0-12 + last)
 #layers=("last" 0 1 2 3 4 5 6 7 8 9 10 11 12)
-n=32
+n=27
 layers=($(seq 0 $n))
 
 # Get the current layer from the array index
@@ -36,9 +39,9 @@ export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # Run the probe training for the specific layer
 
 python scripts/train_probes.py \
-    --config config/clip-vit-large-patch14.yaml \
+    --config config/paligemma2-3b-ft-docci-448.yaml \
     --layer $current_layer \
-    --output_dir results/probes/clip-vit-large-patch14/layer_${current_layer} \
+    --output_dir results/probes/paligemma2-3b-ft-docci-448/layer_${current_layer} \
 
 echo "Job finished at: $(date)"
 echo "Layer $current_layer completed successfully"
