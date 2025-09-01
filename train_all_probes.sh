@@ -1,4 +1,3 @@
-
 #!/bin/bash
 #SBATCH --account EUHPC_D27_102
 #SBATCH --job-name=probe_layers
