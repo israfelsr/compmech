@@ -5,7 +5,7 @@ model:
   batch_size: 16
   device: auto
   features_dir: /leonardo_work/EUHPC_D27_102/compmech/features
-  extract_language: False
+  extract_language: True
   tower_name:
   projection_name:
 
