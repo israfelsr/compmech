@@ -539,86 +539,71 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 )
                 inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-                try:
-                    # Extract vision features using the patched vision model
-                    visual_outputs = self.model.model.visual(
-                        inputs["pixel_values"],
-                        grid_thw=None,  # Will be computed internally
-                        output_hidden_states=True,
+                visual_outputs = self.model.model.visual(
+                    inputs["pixel_values"],
+                    grid_thw=inputs["image_grid_thw"],
+                    output_hidden_states=True,
+                )
+
+                # visual_outputs is a tuple (final_features, all_hidden_states)
+                _, all_visual_hidden_states = visual_outputs
+
+                # Process vision hidden states
+                for layer_idx, layer_hidden_state in enumerate(
+                    all_visual_hidden_states
+                ):
+                    layer_name = f"vision_layer_{layer_idx}"
+                    if layer_name not in all_layers_embeddings:
+                        all_layers_embeddings[layer_name] = {}
+
+                    # Global average pooling over spatial dimensions
+                    pooled_features = (
+                        layer_hidden_state.mean(dim=1).float().cpu().numpy()
                     )
 
-                    # visual_outputs is a tuple (final_features, all_hidden_states)
-                    final_visual_features, all_visual_hidden_states = visual_outputs
+                    for i, path in enumerate(batch_image_paths):
+                        all_layers_embeddings[layer_name][path] = pooled_features[i]
 
-                    # Process vision hidden states
+                # Clear vision outputs from GPU memory
+                del visual_outputs, all_visual_hidden_states
+
+                # Extract language model features if enabled
+                if self.extract_language:
+                    outputs = self.model(
+                        **inputs, output_hidden_states=True, return_dict=True
+                    )
+
+                    language_hidden_states = outputs.hidden_states
                     for layer_idx, layer_hidden_state in enumerate(
-                        all_visual_hidden_states
+                        language_hidden_states
                     ):
-                        layer_name = f"vision_layer_{layer_idx}"
+                        layer_name = f"language_layer_{layer_idx}"
                         if layer_name not in all_layers_embeddings:
                             all_layers_embeddings[layer_name] = {}
 
-                        # Global average pooling over spatial dimensions
+                        # Average over sequence length to get sentence-level representation
+                        # Only consider non-padding tokens using attention mask
+                        attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
+                        masked_hidden_states = layer_hidden_state * attention_mask
                         pooled_features = (
-                            layer_hidden_state.mean(dim=1).float().cpu().numpy()
+                            (
+                                masked_hidden_states.sum(dim=1)
+                                / attention_mask.sum(dim=1)
+                            )
+                            .float()
+                            .cpu()
+                            .numpy()
                         )
 
                         for i, path in enumerate(batch_image_paths):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
 
-                    # Extract language model features if enabled
-                    if self.extract_language:
-                        outputs = self.model(
-                            **inputs, output_hidden_states=True, return_dict=True
-                        )
+                    # Clear language outputs from GPU memory
+                    del outputs, language_hidden_states
 
-                        language_hidden_states = outputs.hidden_states
-                        for layer_idx, layer_hidden_state in enumerate(
-                            language_hidden_states
-                        ):
-                            layer_name = f"language_layer_{layer_idx}"
-                            if layer_name not in all_layers_embeddings:
-                                all_layers_embeddings[layer_name] = {}
-
-                            # Average over sequence length to get sentence-level representation
-                            # Only consider non-padding tokens using attention mask
-                            attention_mask = (
-                                inputs["attention_mask"].unsqueeze(-1).float()
-                            )
-                            masked_hidden_states = layer_hidden_state * attention_mask
-                            pooled_features = (
-                                (
-                                    masked_hidden_states.sum(dim=1)
-                                    / attention_mask.sum(dim=1)
-                                )
-                                .float()
-                                .cpu()
-                                .numpy()
-                            )
-
-                            for i, path in enumerate(batch_image_paths):
-                                all_layers_embeddings[layer_name][path] = (
-                                    pooled_features[i]
-                                )
-
-                except Exception as e:
-                    logging.error(f"Error processing batch {batch_idx}: {e}")
-                    # Add empty features for failed batch
-                    for path in batch_image_paths:
-                        for layer_name in all_layers_embeddings.keys():
-                            if path not in all_layers_embeddings[layer_name]:
-                                # Use zero vector with appropriate dimension
-                                feature_dim = 768  # Default dimension
-                                if all_layers_embeddings[layer_name]:
-                                    feature_dim = len(
-                                        list(
-                                            all_layers_embeddings[layer_name].values()
-                                        )[0]
-                                    )
-                                all_layers_embeddings[layer_name][path] = np.zeros(
-                                    feature_dim
-                                )
-                    continue
+                # Clear all input tensors and intermediate variables
+                del inputs
+                torch.cuda.empty_cache()
 
         return all_layers_embeddings
 
