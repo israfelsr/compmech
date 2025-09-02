@@ -53,9 +53,8 @@ def create_prompt(attribute_name: str, model_type: str) -> str:
     """Create model-specific prompt for attribute classification."""
     question = f"Regarding the main object in the image, is the following statement true or false? The object has the attribute: '{attribute_name}'. Answer with only the word 'True' or 'False'."
 
-    if "paligemma2" in model_type.lower() or "paligemma" in model_type.lower():
-        # PaliGemma expects simple prompt format
-        return f"Image: <image>\n{question}"
+    if "paligemma2" in model_type:
+        return f"answer en {question}"
     elif "qwen2.5-vl" in model_type.lower():
         # Qwen2.5-VL format
         return f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
