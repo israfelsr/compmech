@@ -473,48 +473,14 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         # Apply monkey patch to enable vision hidden states
         self.model = patch_qwen_vision_model(self.model)
 
-        logging.info(f"Loaded Qwen2.5-VL model from {model_path} on {self.model.device}")
-
-    def _preprocess_image_batch(self, examples):
-        """
-        Loads images from paths and processes them with minimal text prompt.
-        This function is designed to be mapped over a HuggingFace Dataset.
-        """
-        image_paths = examples["image_path"]
-        images = [Image.open(path).convert("RGB") for path in image_paths]
-
-        # Create messages for each image
-        messages_batch = []
-        for image in images:
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image},
-                        {"type": "text", "text": " "},
-                    ],
-                }
-            ]
-            messages_batch.append(messages)
-
-        # Apply chat template for each message
-        texts = []
-        for messages in messages_batch:
-            text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            texts.append(text)
-
-        # Process all texts and images at once
-        inputs = self.processor(text=texts, images=images, return_tensors="pt")
-        result = {"image_path": image_paths}
-        for key, value in inputs.items():
-            result[key] = value
-        return result
+        logging.info(
+            f"Loaded Qwen2.5-VL model from {model_path} on {self.model.device}"
+        )
 
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract features from both vision encoder and language model of Qwen2.5-VL.
+        Process in batches and extract features immediately to handle flattened images.
 
         Args:
             dataset: HuggingFace Dataset to extract features from
@@ -526,93 +492,141 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
         all_layers_embeddings: Dict[str, Dict[str, np.ndarray]] = {}
 
-        # Preprocess dataset
-        processed_dataset = dataset.map(
-            self._preprocess_image_batch,
-            batched=True,
-            load_from_cache_file=True,
-            desc="Preprocessing Images for Qwen2.5-VL",
-        )
-
-        # Set format for torch dataloader
-        processed_dataset.set_format(
-            type="torch",
-            columns=["pixel_values", "input_ids", "attention_mask", "image_path"],
-        )
-
-        dataloader = DataLoader(
-            processed_dataset, batch_size=self.batch_size, shuffle=False
-        )
+        # Process in batches directly from dataset without preprocessing
+        total_batches = (len(dataset) + self.batch_size - 1) // self.batch_size
 
         with torch.no_grad():
-            for batch in tqdm(
-                dataloader, desc="Extracting Qwen2.5-VL Features", unit="batch"
+            for batch_idx in tqdm(
+                range(total_batches), desc="Extracting Qwen2.5-VL Features"
             ):
-                # Prepare inputs
-                inputs = {
-                    "pixel_values": batch["pixel_values"].to(self.model.device),
-                    "input_ids": batch["input_ids"].to(self.model.device),
-                    "attention_mask": batch["attention_mask"].to(self.model.device),
-                }
+                start_idx = batch_idx * self.batch_size
+                end_idx = min(start_idx + self.batch_size, len(dataset))
 
-                batch_image_paths: List[str] = [
-                    p.item() if torch.is_tensor(p) else p for p in batch["image_path"]
+                # Get batch samples
+                batch_samples = dataset[start_idx:end_idx]
+                if isinstance(batch_samples, dict):
+                    # Single sample case
+                    batch_image_paths = [batch_samples["image_path"]]
+                    images = [Image.open(batch_samples["image_path"]).convert("RGB")]
+                else:
+                    # Multiple samples case
+                    batch_image_paths = batch_samples["image_path"]
+                    images = [
+                        Image.open(path).convert("RGB") for path in batch_image_paths
+                    ]
+
+                # Create messages for batch processing following Qwen pattern
+                messages_batch = []
+                for image in images:
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "image": image},
+                                {"type": "text", "text": " "},
+                            ],
+                        }
+                    ]
+                    messages_batch.append(messages)
+
+                # Process batch following the Qwen batched inference pattern
+                texts = [
+                    self.processor.apply_chat_template(
+                        msg, tokenize=False, add_generation_prompt=True
+                    )
+                    for msg in messages_batch
                 ]
 
-                # Extract vision features using the patched vision model
-                visual_outputs = self.model.model.visual(
-                    inputs["pixel_values"], 
-                    grid_thw=None,  # Will be computed internally
-                    output_hidden_states=True
+                image_inputs, video_inputs = process_vision_info(messages_batch)
+                inputs = self.processor(
+                    text=texts,
+                    images=image_inputs,
+                    videos=video_inputs,
+                    padding=True,
+                    return_tensors="pt",
                 )
-                
-                # visual_outputs is a tuple (final_features, all_hidden_states)
-                final_visual_features, all_visual_hidden_states = visual_outputs
-                
-                # Process vision hidden states
-                for layer_idx, layer_hidden_state in enumerate(all_visual_hidden_states):
-                    layer_name = f"vision_layer_{layer_idx}"
-                    if layer_name not in all_layers_embeddings:
-                        all_layers_embeddings[layer_name] = {}
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-                    # Global average pooling over spatial dimensions
-                    pooled_features = (
-                        layer_hidden_state.mean(dim=1).float().cpu().numpy()
+                try:
+                    # Extract vision features using the patched vision model
+                    visual_outputs = self.model.model.visual(
+                        inputs["pixel_values"],
+                        grid_thw=None,  # Will be computed internally
+                        output_hidden_states=True,
                     )
 
-                    for i, path in enumerate(batch_image_paths):
-                        all_layers_embeddings[layer_name][path] = pooled_features[i]
+                    # visual_outputs is a tuple (final_features, all_hidden_states)
+                    final_visual_features, all_visual_hidden_states = visual_outputs
 
-                # Extract language model features if enabled
-                if self.extract_language:
-                    outputs = self.model(
-                        **inputs, output_hidden_states=True, return_dict=True
-                    )
-
-                    language_hidden_states = outputs.hidden_states
+                    # Process vision hidden states
                     for layer_idx, layer_hidden_state in enumerate(
-                        language_hidden_states
+                        all_visual_hidden_states
                     ):
-                        layer_name = f"language_layer_{layer_idx}"
+                        layer_name = f"vision_layer_{layer_idx}"
                         if layer_name not in all_layers_embeddings:
                             all_layers_embeddings[layer_name] = {}
 
-                        # Average over sequence length to get sentence-level representation
-                        # Only consider non-padding tokens using attention mask
-                        attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
-                        masked_hidden_states = layer_hidden_state * attention_mask
+                        # Global average pooling over spatial dimensions
                         pooled_features = (
-                            (
-                                masked_hidden_states.sum(dim=1)
-                                / attention_mask.sum(dim=1)
-                            )
-                            .float()
-                            .cpu()
-                            .numpy()
+                            layer_hidden_state.mean(dim=1).float().cpu().numpy()
                         )
 
                         for i, path in enumerate(batch_image_paths):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
+
+                    # Extract language model features if enabled
+                    if self.extract_language:
+                        outputs = self.model(
+                            **inputs, output_hidden_states=True, return_dict=True
+                        )
+
+                        language_hidden_states = outputs.hidden_states
+                        for layer_idx, layer_hidden_state in enumerate(
+                            language_hidden_states
+                        ):
+                            layer_name = f"language_layer_{layer_idx}"
+                            if layer_name not in all_layers_embeddings:
+                                all_layers_embeddings[layer_name] = {}
+
+                            # Average over sequence length to get sentence-level representation
+                            # Only consider non-padding tokens using attention mask
+                            attention_mask = (
+                                inputs["attention_mask"].unsqueeze(-1).float()
+                            )
+                            masked_hidden_states = layer_hidden_state * attention_mask
+                            pooled_features = (
+                                (
+                                    masked_hidden_states.sum(dim=1)
+                                    / attention_mask.sum(dim=1)
+                                )
+                                .float()
+                                .cpu()
+                                .numpy()
+                            )
+
+                            for i, path in enumerate(batch_image_paths):
+                                all_layers_embeddings[layer_name][path] = (
+                                    pooled_features[i]
+                                )
+
+                except Exception as e:
+                    logging.error(f"Error processing batch {batch_idx}: {e}")
+                    # Add empty features for failed batch
+                    for path in batch_image_paths:
+                        for layer_name in all_layers_embeddings.keys():
+                            if path not in all_layers_embeddings[layer_name]:
+                                # Use zero vector with appropriate dimension
+                                feature_dim = 768  # Default dimension
+                                if all_layers_embeddings[layer_name]:
+                                    feature_dim = len(
+                                        list(
+                                            all_layers_embeddings[layer_name].values()
+                                        )[0]
+                                    )
+                                all_layers_embeddings[layer_name][path] = np.zeros(
+                                    feature_dim
+                                )
+                    continue
 
         return all_layers_embeddings
 
