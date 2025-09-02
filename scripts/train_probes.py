@@ -105,7 +105,7 @@ def main():
     probe_config = config["probe"]
     probe_trainer = AttributeProbes(
         dataset=dataset,
-        layer=f"vision_layer_{layer_idx}",
+        layer=f"layer_{layer_idx}",
         probe_type=probe_config["type"],
         random_seed=probe_config["seed"],
     )
