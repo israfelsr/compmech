@@ -504,16 +504,9 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
                 # Get batch samples
                 batch_samples = dataset[start_idx:end_idx]
-                if isinstance(batch_samples, dict):
-                    # Single sample case
-                    batch_image_paths = [batch_samples["image_path"]]
-                    images = [Image.open(batch_samples["image_path"]).convert("RGB")]
-                else:
-                    # Multiple samples case
-                    batch_image_paths = batch_samples["image_path"]
-                    images = [
-                        Image.open(path).convert("RGB") for path in batch_image_paths
-                    ]
+
+                batch_image_paths = batch_samples["image_path"]
+                images = [Image.open(path).convert("RGB") for path in batch_image_paths]
 
                 # Create messages for batch processing following Qwen pattern
                 messages_batch = []
@@ -537,11 +530,10 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                     for msg in messages_batch
                 ]
 
-                image_inputs, video_inputs = process_vision_info(messages_batch)
+                image_inputs, _ = process_vision_info(messages_batch)
                 inputs = self.processor(
                     text=texts,
                     images=image_inputs,
-                    videos=video_inputs,
                     padding=True,
                     return_tensors="pt",
                 )
