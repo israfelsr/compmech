@@ -27,7 +27,7 @@ def load_layer_features(
         raise FileNotFoundError(
             f"Features directory does not exist: {model_features_dir}"
         )
-    feature_dataset_path = model_features_dir / f"layer_{layer}.pt"
+    feature_dataset_path = model_features_dir / f"lang_layer_{layer}.pt"
     logging.info(f"Loading cached features for layer {layer}")
     cached_layers_features = {}
     try:
@@ -42,7 +42,7 @@ def load_layer_features(
 
     merged_dataset = dataset
     features = cached_layers_features[layer]
-    feature_column_name = f"layer_{layer}"
+    feature_column_name = f"lang_layer_{layer}"
     feature_values = []
 
     for sample in dataset:
@@ -167,11 +167,6 @@ class AttributeProbes:
                 X_val = self.features[val_mask]
                 y_train = y[train_mask]
                 y_val = y[val_mask]
-
-                # # Standardize features
-                # scaler = StandardScaler()
-                # X_train_scaled = scaler.fit_transform(X_train)
-                # X_val_scaled = scaler.transform(X_val)
 
                 # Train probe
                 probe = self._create_probe()
