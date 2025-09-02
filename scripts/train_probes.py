@@ -57,6 +57,9 @@ def main():
     parser.add_argument("--n-repeats", type=int, help="Override of CV repeats")
     parser.add_argument("--output_dir", type=str, help="Override directory for results")
     parser.add_argument(
+        "--prefix", type=str, default="", help="prefix for feature names"
+    )
+    parser.add_argument(
         "--specific-attributes",
         nargs="+",
         type=int,
@@ -99,13 +102,14 @@ def main():
         model_name=model_config["model_name"],
         layer=layer_idx,
         features_dir=model_config["features_dir"],
+        prefix=args.prefix,
     )
 
     # Initialize probe trainer
     probe_config = config["probe"]
     probe_trainer = AttributeProbes(
         dataset=dataset,
-        layer=f"lang_layer_{layer_idx}",
+        layer=f"layer_{layer_idx}",
         probe_type=probe_config["type"],
         random_seed=probe_config["seed"],
     )

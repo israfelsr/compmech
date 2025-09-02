@@ -18,6 +18,7 @@ def load_layer_features(
     model_name: str,
     layer: str,
     features_dir: str = "/home/bzq999/data/compmech/features/",
+    prefix: str = "",
 ):
     if isinstance(layer, list):
         layer = layer[0]
@@ -27,7 +28,7 @@ def load_layer_features(
         raise FileNotFoundError(
             f"Features directory does not exist: {model_features_dir}"
         )
-    feature_dataset_path = model_features_dir / f"lang_layer_{layer}.pt"
+    feature_dataset_path = model_features_dir / f"{prefix}layer_{layer}.pt"
     logging.info(f"Loading cached features for layer {layer}")
     cached_layers_features = {}
     try:
@@ -42,7 +43,7 @@ def load_layer_features(
 
     merged_dataset = dataset
     features = cached_layers_features[layer]
-    feature_column_name = f"lang_layer_{layer}"
+    feature_column_name = f"layer_{layer}"
     feature_values = []
 
     for sample in dataset:
