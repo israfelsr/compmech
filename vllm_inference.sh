@@ -11,4 +11,4 @@
 # Run your job
 export PYTHONPATH=$(pwd)
 python scripts/prompting.py \
-    --config config/paligemma2-3b-ft-docci-448.yaml
+    --config config/Qwen2.5-VL-3B-Instruct.yaml
