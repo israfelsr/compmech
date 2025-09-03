@@ -66,6 +66,7 @@ def create_vllm_prompts_batch(
         # Qwen2.5-VL format for vLLM (no vision tokens needed)
         prompt_text = (
             "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
             f"<|im_start|>user\n{question}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
