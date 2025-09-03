@@ -31,15 +31,10 @@ def get_model_config(model_name: str) -> dict:
     model_name_lower = model_name.lower()
 
     if "paligemma2" in model_name_lower:
-        # return {
-        #     "max_model_len": 2048,
-        #     "limit_mm_per_prompt": {"image": 1},
-        #     "trust_remote_code": True,
-        # }
         return {
             "limit_mm_per_prompt": {"image": 1},
         }
-    elif "qwen2.5-vl" in model_name_lower or "qwen2_5" in model_name_lower:
+    elif "qwen2.5-vl" in model_name_lower:
         return {
             "max_model_len": 4096,
             "max_num_seqs": 5,
@@ -68,11 +63,10 @@ def create_vllm_prompts_batch(
         # PaliGemma2 expects <image> token at the beginning as per the warning
         prompt_text = f"answer en {question}\n"
     elif "qwen2.5-vl" in model_name:
-        # Qwen2.5-VL format
+        # Qwen2.5-VL format for vLLM (no vision tokens needed)
         prompt_text = (
             "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
-            f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-            f"{question}<|im_end|>\n"
+            f"<|im_start|>user\n{question}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
     else:
