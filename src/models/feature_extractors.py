@@ -475,10 +475,12 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
         # Apply monkey patch to enable vision hidden states
         self.model = patch_qwen_vision_model(self.model)
-
         logging.info(
             f"Loaded Qwen2.5-VL model from {model_path} on {self.model.device}"
         )
+
+        if not self.extract_language:
+            self.model = self.model.model.visual
 
     def extract_features(self, dataset) -> Dict[str, Dict[str, np.ndarray]]:
         """
@@ -544,17 +546,16 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
 
                 # Extract vision features if enabled
                 if self.extract_vision:
-                    visual_outputs = self.model.model.visual(
+                    visual_outputs = self.model(
                         inputs["pixel_values"],
                         grid_thw=inputs["image_grid_thw"],
                         output_hidden_states=True,
                     )
 
-                    # visual_outputs is a tuple (final_features, all_hidden_states)
-                    _, visual_outputs = visual_outputs
-
                     # Process vision hidden states
-                    for layer_idx, layer_hidden_state in enumerate(visual_outputs):
+                    for layer_idx, layer_hidden_state in enumerate(
+                        visual_outputs[1][:-1]
+                    ):
                         layer_name = f"vision_layer_{layer_idx}"
                         if layer_name not in all_layers_embeddings:
                             all_layers_embeddings[layer_name] = {}
@@ -563,11 +564,11 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                         grid_thw = inputs["image_grid_thw"]
                         patch_sizes = grid_thw[:, 1] * grid_thw[:, 2]
                         batch_ids = torch.arange(
-                            patch_sizes.size(1), device=self.device
+                            patch_sizes.shape[0], device=self.device
                         ).repeat_interleave(patch_sizes)
 
                         pooled_features = torch.zeros(
-                            patch_sizes.size(1),
+                            patch_sizes.shape[0],
                             layer_hidden_state.size(1),
                             device=self.device,
                         )
@@ -579,8 +580,10 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                         for i, path in enumerate(batch_image_paths):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
 
+                    del visual_outputs
+
                 # Extract language model features if enabled
-                if False:
+                if self.extract_language:
                     outputs = self.model(
                         **inputs, output_hidden_states=True, return_dict=True
                     )
