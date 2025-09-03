@@ -444,6 +444,7 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
         batch_size=16,
         device="auto",
         extract_language=True,
+        extract_vision=True,
         tower_name=None,
         projection_name=None,
     ):
@@ -456,11 +457,13 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
             batch_size: Batch size for inference
             device: Device to run on
             extract_language: Whether to extract language features (default True)
+            extract_vision: Whether to extract vision features (default True)
         """
         super().__init__(device)
         self.model_name = model_name or Path(model_path).stem
         self.batch_size = batch_size
         self.extract_language = extract_language
+        self.extract_vision = extract_vision
 
         # Load processor and model
         from src.models.qwen_vision_patch import patch_qwen_vision_model
@@ -539,36 +542,45 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                 )
                 inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-                visual_outputs = self.model.model.visual(
-                    inputs["pixel_values"],
-                    grid_thw=inputs["image_grid_thw"],
-                    output_hidden_states=True,
-                )
-
-                # visual_outputs is a tuple (final_features, all_hidden_states)
-                _, all_visual_hidden_states = visual_outputs
-
-                # Process vision hidden states
-                for layer_idx, layer_hidden_state in enumerate(
-                    all_visual_hidden_states
-                ):
-                    layer_name = f"vision_layer_{layer_idx}"
-                    if layer_name not in all_layers_embeddings:
-                        all_layers_embeddings[layer_name] = {}
-
-                    # Global average pooling over spatial dimensions
-                    pooled_features = (
-                        layer_hidden_state.mean(dim=1).float().cpu().numpy()
+                # Extract vision features if enabled
+                if self.extract_vision:
+                    visual_outputs = self.model.model.visual(
+                        inputs["pixel_values"],
+                        grid_thw=inputs["image_grid_thw"],
+                        output_hidden_states=True,
                     )
 
-                    for i, path in enumerate(batch_image_paths):
-                        all_layers_embeddings[layer_name][path] = pooled_features[i]
+                    # visual_outputs is a tuple (final_features, all_hidden_states)
+                    _, visual_outputs = visual_outputs
 
-                # Clear vision outputs from GPU memory
-                del visual_outputs, all_visual_hidden_states
+                    # Process vision hidden states
+                    for layer_idx, layer_hidden_state in enumerate(visual_outputs):
+                        layer_name = f"vision_layer_{layer_idx}"
+                        if layer_name not in all_layers_embeddings:
+                            all_layers_embeddings[layer_name] = {}
+
+                        # recover batch patches
+                        grid_thw = inputs["image_grid_thw"]
+                        patch_sizes = grid_thw[:, 1] * grid_thw[:, 2]
+                        batch_ids = torch.arange(
+                            patch_sizes.size(1), device=self.device
+                        ).repeat_interleave(patch_sizes)
+
+                        pooled_features = torch.zeros(
+                            patch_sizes.size(1),
+                            layer_hidden_state.size(1),
+                            device=self.device,
+                        )
+                        pooled_features = pooled_features.index_add(
+                            0, batch_ids, layer_hidden_state.float()
+                        )
+                        pooled_features /= patch_sizes.unsqueeze(1)
+
+                        for i, path in enumerate(batch_image_paths):
+                            all_layers_embeddings[layer_name][path] = pooled_features[i]
 
                 # Extract language model features if enabled
-                if self.extract_language:
+                if False:
                     outputs = self.model(
                         **inputs, output_hidden_states=True, return_dict=True
                     )
