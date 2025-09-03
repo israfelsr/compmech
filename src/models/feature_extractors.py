@@ -633,6 +633,7 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
         batch_size=16,
         device="auto",
         extract_language=True,
+        extract_vision=False,
         tower_name=None,
         projection_name=None,
     ):
@@ -650,6 +651,7 @@ class PaliGemmaFeatureExtractor(BaseFeatureExtractor):
         self.model_name = model_name or Path(model_path).stem
         self.batch_size = batch_size
         self.extract_language = extract_language
+        self.extract_vision = extract_vision
 
         # Load processor and model
         self.processor = PaliGemmaProcessor.from_pretrained(model_path, use_fast=True)

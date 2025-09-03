@@ -80,6 +80,7 @@ def main():
         model_path=model_config["model_path"],
         batch_size=model_config["batch_size"],
         device=model_config["device"],
+        extract_vision=model_config["extract_vision"],
         extract_language=model_config["extract_language"],
         tower_name=model_config["tower_name"],
         projection_name=model_config["projection_name"],
