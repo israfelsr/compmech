@@ -17,7 +17,7 @@ probe:
   n_repeats: 2
   output_dir: results/
   seed: 42
-  specific_attribute: ['a_bird', 'a_food', 'an_animal', 'has_legs', 'a_vehicle', 'beh_-_flies']
+  specific_attribute:
 
 dataset:
-  path: /leonardo_work/EUHPC_D27_102/compmech/mcrae-x-things-tiny.hf
+  path: /leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data/hf/controlled_images.hf

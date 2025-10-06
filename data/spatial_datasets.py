@@ -1,9 +1,11 @@
 import json
 import os
+import re
 from pathlib import Path
 from datasets import Dataset, Image as HFImage
 import argparse
 from tqdm import tqdm
+from collections import Counter
 
 
 # Dataset configurations
@@ -86,6 +88,57 @@ def get_image_path(base_path, image_id, dataset_key, images_dir):
     return str(base_path / images_dir / filename)
 
 
+def extract_spatial_relation(caption):
+    """
+    Extract spatial relation from the correct caption.
+
+    Looks for spatial prepositions and relations in the caption text.
+    Returns the detected relation or 'unknown' if none found.
+
+    Args:
+        caption: The correct caption text
+
+    Returns:
+        str: The detected spatial relation (e.g., 'left', 'right', 'above', 'below')
+    """
+    caption_lower = caption.lower()
+
+    # Define spatial relations with their patterns (ordered by specificity)
+    # More specific patterns first to avoid matching substrings
+    spatial_patterns = [
+        # Compound prepositions
+        (r'\bleft of\b', 'left'),
+        (r'\bright of\b', 'right'),
+        (r'\bon top of\b', 'top'),
+        (r'\bon the left\b', 'left'),
+        (r'\bon the right\b', 'right'),
+        (r'\bto the left\b', 'left'),
+        (r'\bto the right\b', 'right'),
+        (r'\bin front of\b', 'front'),
+        (r'\bbehind\b', 'behind'),
+        (r'\babove\b', 'above'),
+        (r'\bbelow\b', 'below'),
+        (r'\bunder\b', 'under'),
+        (r'\bbeneath\b', 'under'),
+        (r'\bover\b', 'over'),
+        (r'\btop\b', 'top'),
+        (r'\bbottom\b', 'bottom'),
+        # Simple directional words
+        (r'\bleft\b', 'left'),
+        (r'\bright\b', 'right'),
+        (r'\bup\b', 'up'),
+        (r'\bdown\b', 'down'),
+        (r'\bon\b', 'on'),
+    ]
+
+    # Try to match each pattern
+    for pattern, relation in spatial_patterns:
+        if re.search(pattern, caption_lower):
+            return relation
+
+    return 'unknown'
+
+
 def convert_dataset(base_path, dataset_key, output_dir):
     """
     Convert a single dataset to unified HuggingFace format.
@@ -114,9 +167,16 @@ def convert_dataset(base_path, dataset_key, output_dir):
     print(f"Total samples: {len(data)}")
 
     # Convert to unified format
-    unified_data = {"image_path": [], "captions": [], "label": []}
+    unified_data = {
+        "image_path": [],
+        "captions": [],
+        "label": [],
+        "spatial_relation": []
+    }
 
     skipped = 0
+    relation_counts = Counter()
+
     for item in tqdm(data, desc="Processing"):
         # Extract data
         image_id = get_image_id(item)
@@ -128,21 +188,28 @@ def convert_dataset(base_path, dataset_key, output_dir):
             skipped += 1
             continue
 
+        # Extract spatial relation from correct caption (first one)
+        correct_caption = captions[0]
+        spatial_relation = extract_spatial_relation(correct_caption)
+        relation_counts[spatial_relation] += 1
+
         # Unified format: correct caption is always first (label = 0)
         unified_data["image_path"].append(img_path)
         unified_data["captions"].append(captions)
         unified_data["label"].append(0)  # First caption is always correct
+        unified_data["spatial_relation"].append(spatial_relation)
 
     if skipped > 0:
         print(f"⚠️  Skipped {skipped} samples due to missing images")
 
+    # Print spatial relation distribution
+    print("\nSpatial relation distribution:")
+    for relation, count in relation_counts.most_common():
+        print(f"  {relation}: {count} ({count/len(unified_data['label'])*100:.1f}%)")
+
     # Create HuggingFace Dataset
     print("Creating HuggingFace dataset...")
     dataset = Dataset.from_dict(unified_data)
-
-    # Add metadata
-    dataset = dataset.add_column("dataset_name", [dataset_key] * len(dataset))
-    dataset = dataset.add_column("description", [config["description"]] * len(dataset))
 
     # Save dataset
     output_path = Path(output_dir) / f"{dataset_key}.hf"
@@ -155,12 +222,12 @@ def convert_dataset(base_path, dataset_key, output_dir):
     print("\nSample entry:")
     sample = dataset[0]
     print(f"  Image path: {sample['image_path']}")
+    print(f"  Spatial relation: {sample['spatial_relation']}")
     print(f"  Captions ({len(sample['captions'])} options):")
     for i, cap in enumerate(sample["captions"]):
         marker = "✓" if i == sample["label"] else "✗"
         print(f"    {marker} [{i}] {cap}")
     print(f"  Label: {sample['label']}")
-    print(f"  Dataset: {sample['dataset_name']}")
 
     return dataset
 
@@ -254,6 +321,16 @@ def main():
     print("\nDataset sizes:")
     for name, ds in converted_datasets.items():
         print(f"  {name}: {len(ds)} samples")
+
+    # Aggregate spatial relation statistics across all datasets
+    print("\nSpatial relation distribution across ALL datasets:")
+    all_relations = Counter()
+    for name, ds in converted_datasets.items():
+        relations = ds['spatial_relation']
+        all_relations.update(relations)
+
+    for relation, count in all_relations.most_common():
+        print(f"  {relation}: {count} ({count/total_samples*100:.1f}%)")
 
     print(f"\nDatasets saved to: {output_dir}")
 
