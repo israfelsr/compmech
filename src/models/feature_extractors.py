@@ -588,16 +588,13 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                         **inputs, output_hidden_states=True, return_dict=True
                     )
 
-                    language_hidden_states = outputs.hidden_states
                     for layer_idx, layer_hidden_state in enumerate(
-                        language_hidden_states
+                        outputs.hidden_states
                     ):
                         layer_name = f"language_layer_{layer_idx}"
                         if layer_name not in all_layers_embeddings:
                             all_layers_embeddings[layer_name] = {}
 
-                        # Average over sequence length to get sentence-level representation
-                        # Only consider non-padding tokens using attention mask
                         attention_mask = inputs["attention_mask"].unsqueeze(-1).float()
                         masked_hidden_states = layer_hidden_state * attention_mask
                         pooled_features = (
@@ -614,7 +611,7 @@ class QwenFeatureExtractor(BaseFeatureExtractor):
                             all_layers_embeddings[layer_name][path] = pooled_features[i]
 
                     # Clear language outputs from GPU memory
-                    del outputs, language_hidden_states
+                    del outputs
 
                 # Clear all input tensors and intermediate variables
                 del inputs

@@ -33,7 +33,7 @@ def load_layer_features(
     cached_layers_features = {}
     try:
         cached_layers_features[layer] = torch.load(
-            feature_dataset_path, weights_only=False
+            feature_dataset_path, weights_only=False, map_location=torch.device("cpu")
         )
         logging.info(
             f"Loaded {len(cached_layers_features[layer])} cached features for layer {layer}"
