@@ -15,8 +15,8 @@ probe:
   n_repeats: 2
   output_dir: results/
   seed: 42
-  specific_attribute: ['a_bird']
+  specific_attribute:
 
 
 dataset:
-  path: /leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data/hf/controlled_images.hf/
+  path: [/leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data/hf/vg_one_obj.hf/, /leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data/hf/coco_one_obj.hf/]

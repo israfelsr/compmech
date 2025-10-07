@@ -8,7 +8,7 @@ import yaml
 import logging
 import argparse
 from pathlib import Path
-from datasets import load_from_disk
+from datasets import load_from_disk, concatenate_datasets
 import sys
 import os
 from PIL import Image
@@ -66,9 +66,19 @@ def main():
     # Create output directory
     os.makedirs(features_dir, exist_ok=True)
 
-    # Load dataset
-    dataset = load_from_disk(dataset_path)
-    logging.info(f"Loaded dataset with {len(dataset)} samples")
+    # Load dataset(s)
+    if isinstance(dataset_path, list):
+        logging.info(f"Loading and merging {len(dataset_path)} datasets")
+        datasets = []
+        for i, path in enumerate(dataset_path):
+            ds = load_from_disk(path)
+            logging.info(f"Loaded dataset {i+1}/{len(dataset_path)} from {path} with {len(ds)} samples")
+            datasets.append(ds)
+        dataset = concatenate_datasets(datasets)
+        logging.info(f"Merged dataset with {len(dataset)} total samples")
+    else:
+        dataset = load_from_disk(dataset_path)
+        logging.info(f"Loaded dataset with {len(dataset)} samples")
     model_config = config["model"]
 
     processor = AutoProcessor.from_pretrained(model_config["model_path"], use_fast=True)
