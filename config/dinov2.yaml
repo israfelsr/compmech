@@ -5,9 +5,10 @@ model:
   batch_size: 32
   device: auto
   features_dir: /leonardo_work/EUHPC_D27_102/compmech/features
+  extract_vision: True
   extract_language: False
   tower_name:
-  projection:
+  projection_name:
 
 probe:
   type: logistic

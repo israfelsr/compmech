@@ -117,6 +117,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         model_path="facebook/dinov2-base",
         batch_size=16,
         device="auto",
+        extract_vision=True,
         extract_language=False,
         tower_name=None,
         projection_name=None,

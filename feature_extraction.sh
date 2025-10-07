@@ -11,4 +11,4 @@
 # Run your job
 export PYTHONPATH=$(pwd)
 python scripts/extract_features.py \
-    --config config/paligemma2-3b-ft-docci-448.yaml
+    --config config/dinov2.yaml
