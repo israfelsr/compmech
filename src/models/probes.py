@@ -3,7 +3,13 @@ import torch
 import torch.nn as nn
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
+from sklearn.metrics import (
+    f1_score,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    confusion_matrix,
+)
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import logging
@@ -352,3 +358,228 @@ class AttributeProbes:
             summary[f"max_{metric}"] = np.max(scores)
 
         return summary
+
+
+class SpatialProbes:
+    def __init__(
+        self,
+        dataset=None,
+        layer: str = None,
+        probe_type="logistic",
+        random_seed=42,
+        filter_relations=None,
+    ):
+        """
+        Initialize the SpatialProbes class.
+
+        Args:
+            dataset: dataset with 'spatial_relation' column
+            layer: layer name to use as features
+            probe_type: Type of probe to use ('logistic', 'linear', 'mlp')
+            random_seed: Random seed for reproducibility
+            filter_relations: List of relations to keep (e.g., ['top', 'right', 'left', 'bottom'])
+                            If None, keeps all relations except 'behind'
+        """
+        self.layer = layer
+        self.probe_type = probe_type
+        self.random_seed = random_seed
+
+        # Filter dataset
+        if filter_relations is None:
+            # Default: remove 'behind'
+            filter_relations = ["top", "right", "left", "bottom"]
+
+        dataset = dataset.filter(lambda x: x["spatial_relation"] in filter_relations)
+        logging.info(
+            f"Filtered dataset to {len(dataset)} samples with relations: {filter_relations}"
+        )
+
+        self.dataset = dataset.to_pandas()
+        self.features = np.stack(self.dataset[layer].tolist())
+        self.labels = self.dataset["spatial_relation"].values
+        self.class_names = sorted(list(set(self.labels)))
+        self.n_classes = len(self.class_names)
+
+        logging.info(f"Classes: {self.class_names}")
+        logging.info(
+            f"Class distribution: {dict(zip(*np.unique(self.labels, return_counts=True)))}"
+        )
+
+    def _create_probe(self):
+        """Create a probe based on the specified type."""
+        if self.probe_type == "logistic":
+            return LogisticRegression(
+                max_iter=1000,
+                random_state=self.random_seed,
+                n_jobs=-1,
+                multi_class="multinomial",
+                solver="lbfgs",
+            )
+        elif self.probe_type == "linear":
+            from sklearn.svm import LinearSVC
+
+            return LinearSVC(max_iter=1000, random_state=self.random_seed)
+        elif self.probe_type == "mlp":
+            from sklearn.neural_network import MLPClassifier
+
+            return MLPClassifier(
+                hidden_layer_sizes=(100,), max_iter=1000, random_state=self.random_seed
+            )
+        else:
+            raise ValueError(f"Unknown probe type: {self.probe_type}")
+
+    def _generate_random_predictions(
+        self, y_true, class_distribution, random_seed=None
+    ):
+        """Generate random predictions based on class distribution"""
+        np.random.seed(random_seed)
+        classes = list(class_distribution.keys())
+        probs = list(class_distribution.values())
+        probs = np.array(probs) / sum(probs)
+        y_random = np.random.choice(classes, size=len(y_true), p=probs)
+        return y_random
+
+    def train_probe(
+        self,
+        cv_folds: int = 5,
+        n_repeats: int = 2,
+    ) -> Dict:
+        """
+        Train spatial relation probe using stratified cross-validation.
+
+        Args:
+            cv_folds: Number of cross-validation folds
+            n_repeats: Number of times to repeat CV
+
+        Returns:
+            dict: Results containing performance metrics
+        """
+        X = self.features
+        y = self.labels
+
+        all_scores = {
+            "f1_macro": [],
+            "f1_weighted": [],
+            "accuracy": [],
+            "precision_macro": [],
+            "precision_weighted": [],
+            "recall_macro": [],
+            "recall_weighted": [],
+        }
+        baseline_scores = {
+            "f1_macro": [],
+            "f1_weighted": [],
+            "accuracy": [],
+            "precision_macro": [],
+            "precision_weighted": [],
+            "recall_macro": [],
+            "recall_weighted": [],
+        }
+
+        all_confusion_matrices = []
+
+        # Repeat cross-validation multiple times
+        for repeat in range(n_repeats):
+            skf = StratifiedKFold(
+                n_splits=cv_folds, shuffle=True, random_state=self.random_seed + repeat
+            )
+
+            for train_idx, val_idx in skf.split(X, y):
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+
+                # Train probe
+                probe = self._create_probe()
+                probe.fit(X_train, y_train)
+
+                # Make predictions
+                y_pred = probe.predict(X_val)
+
+                # Calculate metrics
+                all_scores["f1_macro"].append(
+                    f1_score(y_val, y_pred, average="macro", zero_division=0)
+                )
+                all_scores["f1_weighted"].append(
+                    f1_score(y_val, y_pred, average="weighted", zero_division=0)
+                )
+                all_scores["accuracy"].append(accuracy_score(y_val, y_pred))
+                all_scores["precision_macro"].append(
+                    precision_score(y_val, y_pred, average="macro", zero_division=0)
+                )
+                all_scores["precision_weighted"].append(
+                    precision_score(y_val, y_pred, average="weighted", zero_division=0)
+                )
+                all_scores["recall_macro"].append(
+                    recall_score(y_val, y_pred, average="macro", zero_division=0)
+                )
+                all_scores["recall_weighted"].append(
+                    recall_score(y_val, y_pred, average="weighted", zero_division=0)
+                )
+
+                # Confusion matrix
+                cm = confusion_matrix(y_val, y_pred, labels=self.class_names)
+                all_confusion_matrices.append(cm)
+
+                # Random baseline evaluation
+                train_class_dist = dict(zip(*np.unique(y_train, return_counts=True)))
+                y_random = self._generate_random_predictions(
+                    y_val, train_class_dist, random_seed=self.random_seed + repeat
+                )
+
+                # Calculate baseline metrics
+                baseline_scores["f1_macro"].append(
+                    f1_score(y_val, y_random, average="macro", zero_division=0)
+                )
+                baseline_scores["f1_weighted"].append(
+                    f1_score(y_val, y_random, average="weighted", zero_division=0)
+                )
+                baseline_scores["accuracy"].append(accuracy_score(y_val, y_random))
+                baseline_scores["precision_macro"].append(
+                    precision_score(y_val, y_random, average="macro", zero_division=0)
+                )
+                baseline_scores["precision_weighted"].append(
+                    precision_score(
+                        y_val, y_random, average="weighted", zero_division=0
+                    )
+                )
+                baseline_scores["recall_macro"].append(
+                    recall_score(y_val, y_random, average="macro", zero_division=0)
+                )
+                baseline_scores["recall_weighted"].append(
+                    recall_score(y_val, y_random, average="weighted", zero_division=0)
+                )
+
+        # Average confusion matrix
+        avg_confusion_matrix = np.mean(all_confusion_matrices, axis=0)
+
+        # Create results dictionary
+        results = {
+            "task": "spatial_relation_classification",
+            "n_classes": self.n_classes,
+            "class_names": self.class_names,
+            "n_samples": len(y),
+            "class_distribution": dict(zip(*np.unique(y, return_counts=True))),
+        }
+
+        # Add mean and std for each metric
+        for metric, scores in all_scores.items():
+            results[f"mean_{metric}"] = np.mean(scores)
+            results[f"std_{metric}"] = np.std(scores)
+            results[f"{metric}_scores"] = scores
+
+        # Add baseline results
+        for metric, scores in baseline_scores.items():
+            results[f"baseline_mean_{metric}"] = np.mean(scores)
+            results[f"baseline_std_{metric}"] = np.std(scores)
+            results[f"baseline_{metric}_scores"] = scores
+
+        # Add improvement over baseline
+        for metric in all_scores.keys():
+            improvement = results[f"mean_{metric}"] - results[f"baseline_mean_{metric}"]
+            results[f"{metric}_improvement"] = improvement
+
+        # Add confusion matrix
+        results["avg_confusion_matrix"] = avg_confusion_matrix.tolist()
+        results["confusion_matrix_labels"] = self.class_names
+
+        return results

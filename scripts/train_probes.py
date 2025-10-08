@@ -17,7 +17,7 @@ from typing import List, Dict, Any
 # Add src to path to import modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 from src.models.feature_extractors import get_feature_extractor
-from src.models.probes import AttributeProbes, load_layer_features
+from src.models.probes import AttributeProbes, SpatialProbes, load_layer_features
 
 
 def setup_logging():
@@ -38,35 +38,6 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def preprocess_spatial_dataset(dataset):
-    """
-    Preprocess spatial relation dataset to match attribute format.
-    - Filter out 'behind' relations
-    - Convert spatial_relation to binary columns
-    - Rename 'label' to 'concept'
-    """
-    # Filter out 'behind'
-    dataset = dataset.filter(lambda x: x['spatial_relation'] != 'behind')
-    logging.info(f"Filtered dataset size (removed 'behind'): {len(dataset)}")
-
-    # Get unique spatial relations
-    spatial_relations = ['top', 'right', 'left', 'bottom']
-    logging.info(f"Creating binary columns for: {spatial_relations}")
-
-    # Create binary columns for each spatial relation
-    for relation in spatial_relations:
-        dataset = dataset.map(
-            lambda x: {f'is_{relation}': 1 if x['spatial_relation'] == relation else 0}
-        )
-
-    # Rename 'label' to 'concept' if it exists
-    if 'label' in dataset.column_names:
-        dataset = dataset.rename_column('label', 'concept')
-
-    # Remove original spatial_relation column
-    dataset = dataset.remove_columns(['spatial_relation'])
-
-    return dataset
 
 
 def main():
@@ -122,22 +93,17 @@ def main():
     else:
         dataset = load_from_disk(dataset_path)
 
-    # Preprocess spatial dataset if requested
-    if args.spatial:
-        logging.info("Applying spatial dataset preprocessing...")
-        dataset = preprocess_spatial_dataset(dataset)
-
     model_config = config["model"]
     if args.layer:
         layer_idx = args.layer
-    elif model_config["layers"]:
+    elif model_config.get("layers"):
         layer_idx = model_config["layers"]
+    else:
+        raise ValueError("No layer specified. Use --layer argument or set layers in config.")
 
     logging.info(f"Will probe layer: {layer_idx}")
 
     # Get layer features
-    model_config = config["model"]
-
     dataset = load_layer_features(
         dataset=dataset,
         model_name=model_config["model_name"],
@@ -146,31 +112,51 @@ def main():
         prefix=args.prefix,
     )
 
-    # Initialize probe trainer
+    # Initialize probe trainer based on task type
     probe_config = config["probe"]
-    probe_trainer = AttributeProbes(
-        dataset=dataset,
-        layer=f"layer_{layer_idx}",
-        probe_type=probe_config["type"],
-        random_seed=probe_config["seed"],
-    )
 
-    # Train probes
-    if probe_config["specific_attribute"]:
-        logging.info(
-            f"Training probes for specific attributes: {probe_config['specific_attribute']}"
+    if args.spatial:
+        # Use SpatialProbes for spatial relation classification
+        logging.info("Using SpatialProbes for spatial relation classification")
+        probe_trainer = SpatialProbes(
+            dataset=dataset,
+            layer=f"layer_{layer_idx}",
+            probe_type=probe_config["type"],
+            random_seed=probe_config["seed"],
         )
-        results = probe_trainer.evaluate_specific_attributes(
-            attributes=probe_config["specific_attribute"],
+
+        # Train spatial probe
+        logging.info("Training spatial relation classifier")
+        results = probe_trainer.train_probe(
             cv_folds=probe_config["cv_folds"],
             n_repeats=probe_config["n_repeats"],
         )
     else:
-        logging.info("Training probes for all attributes")
-        results = probe_trainer.train_all_probes(
-            cv_folds=probe_config["cv_folds"],
-            n_repeats=probe_config["n_repeats"],
+        # Use AttributeProbes for attribute classification
+        logging.info("Using AttributeProbes for attribute classification")
+        probe_trainer = AttributeProbes(
+            dataset=dataset,
+            layer=f"layer_{layer_idx}",
+            probe_type=probe_config["type"],
+            random_seed=probe_config["seed"],
         )
+
+        # Train attribute probes
+        if probe_config["specific_attribute"]:
+            logging.info(
+                f"Training probes for specific attributes: {probe_config['specific_attribute']}"
+            )
+            results = probe_trainer.evaluate_specific_attributes(
+                attributes=probe_config["specific_attribute"],
+                cv_folds=probe_config["cv_folds"],
+                n_repeats=probe_config["n_repeats"],
+            )
+        else:
+            logging.info("Training probes for all attributes")
+            results = probe_trainer.train_all_probes(
+                cv_folds=probe_config["cv_folds"],
+                n_repeats=probe_config["n_repeats"],
+            )
 
     # Save results
     if args.output_dir:
@@ -192,17 +178,30 @@ def main():
 
     # Print summary
     print(f"\nProbe Training Summary:")
-    print(f"- Probe type: {args.probe_type}")
-    print(f"- Layers used: {layer_idx}")
-    # print(f"- Feature dimension: {features.shape[1]}")
-    # print(f"- Number of samples: {features.shape[0]}")
-    print(f"- Number of attributes tested: {results['summary']['n_attributes_tested']}")
-    print(
-        f"- Mean F1 score: {results['summary']['mean_f1_across_attributes']:.4f} � {results['summary']['std_f1_across_attributes']:.4f}"
-    )
-    print(
-        f"- Mean accuracy: {results['summary']['mean_accuracy_across_attributes']:.4f} � {results['summary']['std_accuracy_across_attributes']:.4f}"
-    )
+    print(f"- Probe type: {probe_config['type']}")
+    print(f"- Layer: {layer_idx}")
+
+    if args.spatial:
+        # Spatial probe results
+        print(f"- Task: Spatial relation classification")
+        print(f"- Number of samples: {results['n_samples']}")
+        print(f"- Number of classes: {results['n_classes']}")
+        print(f"- Classes: {results['class_names']}")
+        print(f"- Accuracy: {results['mean_accuracy']:.4f} ± {results['std_accuracy']:.4f}")
+        print(f"- F1 (macro): {results['mean_f1_macro']:.4f} ± {results['std_f1_macro']:.4f}")
+        print(f"- F1 (weighted): {results['mean_f1_weighted']:.4f} ± {results['std_f1_weighted']:.4f}")
+        print(f"- Baseline accuracy: {results['baseline_mean_accuracy']:.4f}")
+        print(f"- Improvement over baseline: {results['accuracy_improvement']:.4f}")
+    else:
+        # Attribute probe results
+        print(f"- Number of attributes tested: {results['summary']['n_attributes_tested']}")
+        print(
+            f"- Mean F1 score: {results['summary']['mean_f1_across_attributes']:.4f} ± {results['summary']['std_f1_across_attributes']:.4f}"
+        )
+        print(
+            f"- Mean accuracy: {results['summary']['mean_accuracy_across_attributes']:.4f} ± {results['summary']['std_accuracy_across_attributes']:.4f}"
+        )
+
     print(f"- Results saved to: {results_path}")
 
 
