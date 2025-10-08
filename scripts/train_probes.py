@@ -38,6 +38,37 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def preprocess_spatial_dataset(dataset):
+    """
+    Preprocess spatial relation dataset to match attribute format.
+    - Filter out 'behind' relations
+    - Convert spatial_relation to binary columns
+    - Rename 'label' to 'concept'
+    """
+    # Filter out 'behind'
+    dataset = dataset.filter(lambda x: x['spatial_relation'] != 'behind')
+    logging.info(f"Filtered dataset size (removed 'behind'): {len(dataset)}")
+
+    # Get unique spatial relations
+    spatial_relations = ['top', 'right', 'left', 'bottom']
+    logging.info(f"Creating binary columns for: {spatial_relations}")
+
+    # Create binary columns for each spatial relation
+    for relation in spatial_relations:
+        dataset = dataset.map(
+            lambda x: {f'is_{relation}': 1 if x['spatial_relation'] == relation else 0}
+        )
+
+    # Rename 'label' to 'concept' if it exists
+    if 'label' in dataset.column_names:
+        dataset = dataset.rename_column('label', 'concept')
+
+    # Remove original spatial_relation column
+    dataset = dataset.remove_columns(['spatial_relation'])
+
+    return dataset
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train probes on extracted features")
     parser.add_argument(
@@ -65,6 +96,11 @@ def main():
         type=int,
         help="Train probes only for specific attribute indices",
     )
+    parser.add_argument(
+        "--spatial",
+        action="store_true",
+        help="Preprocess spatial relation dataset (filter 'behind', create binary columns)",
+    )
 
     args = parser.parse_args()
 
@@ -85,6 +121,11 @@ def main():
         logging.info(f"Concatenated dataset size: {len(dataset)}")
     else:
         dataset = load_from_disk(dataset_path)
+
+    # Preprocess spatial dataset if requested
+    if args.spatial:
+        logging.info("Applying spatial dataset preprocessing...")
+        dataset = preprocess_spatial_dataset(dataset)
 
     model_config = config["model"]
     if args.layer:
