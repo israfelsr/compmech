@@ -8,7 +8,7 @@ import logging
 import argparse
 import numpy as np
 from pathlib import Path
-from datasets import load_from_disk
+from datasets import load_from_disk, concatenate_datasets
 import sys
 import os
 import json
@@ -77,7 +77,14 @@ def main():
     # Override paths if provided
     dataset_path = args.dataset_path or config["dataset"]["path"]
 
-    dataset = load_from_disk(dataset_path)
+    # Handle multiple datasets (concatenate if list)
+    if isinstance(dataset_path, list):
+        logging.info(f"Loading and concatenating {len(dataset_path)} datasets")
+        datasets = [load_from_disk(path) for path in dataset_path]
+        dataset = concatenate_datasets(datasets)
+        logging.info(f"Concatenated dataset size: {len(dataset)}")
+    else:
+        dataset = load_from_disk(dataset_path)
 
     model_config = config["model"]
     if args.layer:
