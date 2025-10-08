@@ -89,13 +89,6 @@ def main():
 
     # Get layer features
     model_config = config["model"]
-    # extractor = get_feature_extractor(
-    #     extractor_type=model_config["type"],
-    #     model_name=model_config["model_name"],
-    #     model_path=model_config["model_path"],
-    #     batch_size=model_config["batch_size"],
-    #     device=model_config["device"],
-    # )
 
     dataset = load_layer_features(
         dataset=dataset,
