@@ -125,8 +125,21 @@ class QwenVLLMWrapper:
         acc = 0
         correct_id = []
 
+        # Map datasets to their available option files
+        dataset_options = {
+            "COCO_QA_one_obj": "four",
+            "COCO_QA_two_obj": "four",
+            "Controlled_Images_A": "four",
+            "Controlled_Images_B": "four",
+            "VG_QA_one_obj": "six",
+            "VG_QA_two_obj": "six",
+        }
+
+        # Use dataset-specific option if available, otherwise use provided option
+        actual_option = dataset_options.get(dataset, option)
+
         # Load prompts and answers
-        qst_ans_file = f"AdaptVis/prompts/{dataset}_with_answer_{option}_options.jsonl"
+        qst_ans_file = f"AdaptVis/prompts/{dataset}_with_answer_{actual_option}_options.jsonl"
 
         with open(qst_ans_file, "r") as file:
             prompt_list = []

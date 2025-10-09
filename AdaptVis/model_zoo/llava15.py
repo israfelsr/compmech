@@ -292,8 +292,21 @@ class LlavaWrapper:
         acc = 0  # Track the number of correct predictions
         correct_id = []  # Track indices of correct predictions
 
+        # Map datasets to their available option files
+        dataset_options = {
+            "COCO_QA_one_obj": "four",
+            "COCO_QA_two_obj": "four",
+            "Controlled_Images_A": "four",
+            "Controlled_Images_B": "four",
+            "VG_QA_one_obj": "six",
+            "VG_QA_two_obj": "six",
+        }
+
+        # Use dataset-specific option if available, otherwise use provided option
+        actual_option = dataset_options.get(dataset, option)
+
         # Determine the correct question-answer file based on the dataset
-        qst_ans_file = f'prompts/{dataset}_with_answer_{option}_options.jsonl'
+        qst_ans_file = f'prompts/{dataset}_with_answer_{actual_option}_options.jsonl'
         
         # Load prompts and answers from the question-answer file
         with open(qst_ans_file, 'r') as file:
