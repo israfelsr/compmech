@@ -9,11 +9,6 @@ from vllm import LLM, SamplingParams
 
 
 class QwenVLLMWrapper:
-    """
-    Wrapper for Qwen2-VL model using vLLM for faster inference.
-    Based on the vLLM inference patterns used in scripts/vllm_inference.py
-    """
-
     def __init__(
         self,
         root_dir,

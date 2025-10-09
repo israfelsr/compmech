@@ -46,9 +46,11 @@ def main(args):
     sampled_indices=None
     collate_fn = _default_collate if image_preprocess is None else None
 
-    #split val and test set    
-    if SAMPLE==True:  
+    #split val and test set
+    if SAMPLE==True:
         total_data_count = len(dataset)
+        # Create output directory if it doesn't exist
+        os.makedirs('./output', exist_ok=True)
         idx_file_path = f'./output/sampled_idx_{args.dataset}.npy'
         if os.path.exists(idx_file_path):
             sampled_indices = np.load(idx_file_path).tolist()
