@@ -14,7 +14,13 @@ class QwenVLLMWrapper:
     Based on the vLLM inference patterns used in scripts/vllm_inference.py
     """
 
-    def __init__(self, root_dir, device, method='base', model_name='Qwen/Qwen2-VL-7B-Instruct'):
+    def __init__(
+        self,
+        root_dir,
+        device,
+        method="base",
+        model_name="/leonardo_work/EUHPC_D27_102/compmech/models/Qwen2.5-3B",
+    ):
         """
         Initialize Qwen2-VL model wrapper with vLLM.
 
@@ -31,11 +37,7 @@ class QwenVLLMWrapper:
         print(f"Loading Qwen2-VL with vLLM: {model_name}")
         print(f"vLLM config: {vllm_config}")
 
-        self.llm = LLM(
-            model=model_name,
-            download_dir=root_dir,
-            **vllm_config
-        )
+        self.llm = LLM(model=model_name, **vllm_config)
 
         # Set sampling parameters for generation
         self.sampling_params = SamplingParams(
@@ -57,11 +59,10 @@ class QwenVLLMWrapper:
         }
 
         # Add Qwen-specific processor kwargs
-        if "qwen2" in model_name.lower() or "qwen2.5" in model_name.lower():
-            config["mm_processor_kwargs"] = {
-                "min_pixels": 28 * 28,
-                "max_pixels": 1280 * 28 * 28,
-            }
+        config["mm_processor_kwargs"] = {
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+        }
 
         return config
 
@@ -98,7 +99,17 @@ class QwenVLLMWrapper:
         return vllm_prompt
 
     @torch.no_grad()
-    def get_out_scores_wh_batched(self, dataset, joint_loader, method, weight, option, threshold=None, weight1=None, weight2=None):
+    def get_out_scores_wh_batched(
+        self,
+        dataset,
+        joint_loader,
+        method,
+        weight,
+        option,
+        threshold=None,
+        weight1=None,
+        weight2=None,
+    ):
         """
         Generate outputs and scores for What's Up dataset using Qwen2-VL with vLLM.
 
@@ -120,9 +131,9 @@ class QwenVLLMWrapper:
         correct_id = []
 
         # Load prompts and answers
-        qst_ans_file = f'prompts/{dataset}_with_answer_{option}_options.jsonl'
+        qst_ans_file = f"prompts/{dataset}_with_answer_{option}_options.jsonl"
 
-        with open(qst_ans_file, 'r') as file:
+        with open(qst_ans_file, "r") as file:
             prompt_list = []
             answer_list = []
             for line in file:
@@ -132,16 +143,18 @@ class QwenVLLMWrapper:
 
         # Sampling configuration
         SAMPLE = True
-        TEST = os.getenv('TEST_MODE', 'False') == 'True'
+        TEST = os.getenv("TEST_MODE", "False") == "True"
         total_data_count = len(prompt_list)
 
         if SAMPLE:
-            idx_file_path = f'./output/sampled_idx_{dataset}.npy'
+            idx_file_path = f"./output/sampled_idx_{dataset}.npy"
 
             if os.path.exists(idx_file_path):
                 sampled_indices = np.load(idx_file_path).tolist()
             else:
-                sampled_indices = random.sample(range(total_data_count), int(0.2 * total_data_count))
+                sampled_indices = random.sample(
+                    range(total_data_count), int(0.2 * total_data_count)
+                )
                 sampled_indices.sort()
                 np.save(idx_file_path, np.array(sampled_indices))
 
@@ -185,7 +198,9 @@ class QwenVLLMWrapper:
                         prompt = prompt_list[batch_idx]
                         golden_answer = answer_list[batch_idx][0]
 
-                        print(f"Prompt: {prompt}\nGeneration: {gen}\nGolden: {golden_answer}")
+                        print(
+                            f"Prompt: {prompt}\nGeneration: {gen}\nGolden: {golden_answer}"
+                        )
 
                         result = {
                             "Prompt": prompt,
@@ -197,8 +212,13 @@ class QwenVLLMWrapper:
                         # Check if generation matches expected answer
                         c_option = batch["caption_options"]
                         if len(list(c_option)) == 4:
-                            if (golden_answer in gen or golden_answer.lower() in gen.lower()) \
-                                    and not (golden_answer.lower() == 'on' and 'front' in gen.strip().lower()):
+                            if (
+                                golden_answer in gen
+                                or golden_answer.lower() in gen.lower()
+                            ) and not (
+                                golden_answer.lower() == "on"
+                                and "front" in gen.strip().lower()
+                            ):
                                 acc += 1
                                 correct_id.append(batch_idx)
                                 answers = [1, 0, 0, 0]
@@ -206,8 +226,13 @@ class QwenVLLMWrapper:
                                 answers = [0, 0, 1, 0]
 
                         elif len(list(c_option)) == 2:
-                            if (golden_answer in gen or golden_answer.lower() in gen.lower()) \
-                                    and not (golden_answer.lower() == 'on' and 'front' in gen.strip().lower()):
+                            if (
+                                golden_answer in gen
+                                or golden_answer.lower() in gen.lower()
+                            ) and not (
+                                golden_answer.lower() == "on"
+                                and "front" in gen.strip().lower()
+                            ):
                                 acc += 1
                                 correct_id.append(batch_idx)
                                 answers = [1, 0]
@@ -233,22 +258,29 @@ class QwenVLLMWrapper:
             scores.append(batch_scores)
 
             # Save results periodically
-            output_file_path = f'./output/results_qwen_vllm_{dataset}_{method}_{option}option_{TEST}.json'
-            with open(output_file_path, 'w', encoding='utf-8') as fout:
+            output_file_path = f"./output/results_qwen_vllm_{dataset}_{method}_{option}option_{TEST}.json"
+            with open(output_file_path, "w", encoding="utf-8") as fout:
                 json.dump(results, fout, ensure_ascii=False, indent=4)
 
-            print(f"Accuracy: {acc}/{index_of_total} = {acc / index_of_total if index_of_total > 0 else 0}")
+            print(
+                f"Accuracy: {acc}/{index_of_total} = {acc / index_of_total if index_of_total > 0 else 0}"
+            )
 
         # Save final scores
         if index_of_total > 0:
             print(f"Final Accuracy: {acc / index_of_total}")
             output_score_file = output_file_path.replace(".json", "scores.json")
-            with open(output_score_file, 'w', encoding='utf-8') as fout:
-                json.dump({"acc": acc / index_of_total, "correct_id": correct_id}, fout, ensure_ascii=False, indent=4)
+            with open(output_score_file, "w", encoding="utf-8") as fout:
+                json.dump(
+                    {"acc": acc / index_of_total, "correct_id": correct_id},
+                    fout,
+                    ensure_ascii=False,
+                    indent=4,
+                )
 
         # Return scores
         all_scores = np.concatenate(scores, axis=0)  # N x K x L
-        if dataset in ['Controlled_Images_B', 'Controlled_Images_A']:
+        if dataset in ["Controlled_Images_B", "Controlled_Images_A"]:
             return (all_scores, [])
         else:
             return (acc / index_of_total if index_of_total > 0 else 0, correct_id)

@@ -33,7 +33,7 @@ do
     echo "Evaluating on dataset: $dataset"
     echo "----------------------------------------------"
 
-    python main_aro.py \
+    python AdaptVis/main_aro.py \
         --model-name $MODEL \
         --dataset $dataset \
         --option $OPTION \
