@@ -32,14 +32,15 @@ def config():
     parser.add_argument("--weight2", default=1.0, type=float)
     parser.add_argument("--threshold", default=1.0, type=float)
     parser.add_argument("--option", default='four', type=str, choices=['two','four','six'])
+    parser.add_argument("--data-dir", default="/leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data", type=str, help="Root directory containing dataset images")
 
     return parser.parse_args()
 
 
 def main(args):
-    seed_all(args.seed) 
+    seed_all(args.seed)
     model, image_preprocess = get_model(args.model_name, args.device, args.method)
-    dataset = get_dataset(args.dataset, image_preprocess=image_preprocess, download=args.download)
+    dataset = get_dataset(args.dataset, image_preprocess=image_preprocess, download=args.download, root_dir=args.data_dir)
     SAMPLE=True
     TEST=os.getenv('TEST_MODE', 'False') == 'True'
     sampled_indices=None

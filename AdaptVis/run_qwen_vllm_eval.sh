@@ -6,6 +6,7 @@ MODEL="qwen2vl-vllm"
 DEVICE="cuda"
 OPTION="four"
 OUTPUT_BASE="./results/qwen_vllm"
+DATA_DIR="/leonardo_work/EUHPC_D27_102/compmech/whatsup_vlms_data"
 
 # Create output directory
 mkdir -p $OUTPUT_BASE
@@ -38,6 +39,7 @@ do
         --dataset $dataset \
         --option $OPTION \
         --device $DEVICE \
+        --data-dir $DATA_DIR \
         --output-dir "$OUTPUT_BASE/$dataset" \
         --seed 42
 

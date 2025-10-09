@@ -240,10 +240,15 @@ class Controlled_Images(Dataset):
 
     def __getitem__(self, index):
         test_case = self.dataset[index]
-        image = Image.open(test_case["image_path"]).convert('RGB')
+        # Handle both absolute and relative paths
+        image_path = test_case["image_path"]
+        if not os.path.isabs(image_path):
+            # If relative path, join with root_dir
+            image_path = os.path.join(self.root_dir, image_path)
+        image = Image.open(image_path).convert('RGB')
         if self.image_preprocess is not None:
             image = self.image_preprocess(image)
-        
+
         item = edict({"image_options": [image], "caption_options": test_case['caption_options']})
         return item
 
@@ -601,29 +606,29 @@ class VG_QA(Dataset):
         
 
 
-def get_controlled_images_a(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_controlled_images_a(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return Controlled_Images(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='A')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='A')
 
-def get_controlled_images_b(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_controlled_images_b(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return Controlled_Images(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='B')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='B')
 
-def get_coco_qa_one_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_coco_qa_one_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return COCO_QA(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='one')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='one')
 
-def get_coco_qa_two_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_coco_qa_two_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return COCO_QA(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='two')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='two')
 
-def get_vg_qa_one_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_vg_qa_one_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return VG_QA(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='one')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='one')
 
-def get_vg_qa_two_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False):
+def get_vg_qa_two_obj(image_preprocess, text_perturb_fn=None, image_perturb_fn=None, download=False, root_dir='data'):
     return VG_QA(image_preprocess=image_preprocess, text_perturb_fn=text_perturb_fn,
-                   image_perturb_fn=image_perturb_fn, download=download, subset='two')
+                   image_perturb_fn=image_perturb_fn, download=download, root_dir=root_dir, subset='two')
 
 
 def get_vsr(image_preprocess, image_perturb_fn, text_perturb_fn, max_words=30, download=False, root_dir='data', split="test"):
