@@ -126,7 +126,7 @@ class QwenVLLMWrapper:
         correct_id = []
 
         # Load prompts and answers
-        qst_ans_file = f"prompts/{dataset}_with_answer_{option}_options.jsonl"
+        qst_ans_file = f"AdaptVis/prompts/{dataset}_with_answer_{option}_options.jsonl"
 
         with open(qst_ans_file, "r") as file:
             prompt_list = []

@@ -243,7 +243,9 @@ class Controlled_Images(Dataset):
         # Handle both absolute and relative paths
         image_path = test_case["image_path"]
         if not os.path.isabs(image_path):
-            # If relative path, join with root_dir
+            # If relative path, strip 'data/' prefix if present and join with root_dir
+            if image_path.startswith('data/'):
+                image_path = image_path[5:]  # Remove 'data/' prefix
             image_path = os.path.join(self.root_dir, image_path)
         image = Image.open(image_path).convert('RGB')
         if self.image_preprocess is not None:
