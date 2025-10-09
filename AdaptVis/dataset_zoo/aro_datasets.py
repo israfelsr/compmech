@@ -120,6 +120,8 @@ class VSR(Dataset):
     def evaluate_scores(self, model_name,scores,labels,path,dataset):
         # if model_name=='llava1.6_add_attn' or model_name=='llava1.5_add_attn':
         if dataset=='VSR':
+            # Create output directory if it doesn't exist
+            os.makedirs(path, exist_ok=True)
             path_=os.path.join(path, 'res.json')
             import json
             data = {"dataset":dataset, "model":model_name,"scores":scores}
@@ -147,6 +149,8 @@ class VSR(Dataset):
             auc = roc_auc_score(label_flat, score_flat)
             print(f'auc:{auc}')
             import json
+            # Create output directory if it doesn't exist
+            os.makedirs(path, exist_ok=True)
             path_=os.path.join(path, 'res.json')
             data = {"dataset":dataset, "mode":mode,"AUROC":auc*100}
             with open(path_, 'a+') as file:
@@ -335,6 +339,8 @@ class Controlled_Images(Dataset):
                 "Dataset": "Controlled Images - {}".format(self.subset)
             })
         import json
+        # Create output directory if it doesn't exist
+        os.makedirs(path, exist_ok=True)
         path_=os.path.join(path, 'res.json')
         data = {"dataset":dataset, "model":model,"option":option,"method":method,"weight":weight, "Individual accuracy":metrics['Accuracy']*100,"Pair accuracy":pair_accuracy,"Set accuracy":set_accuracy,"correct_id":correct_id}
         with open(path_, 'a+') as file:
@@ -345,6 +351,8 @@ class Controlled_Images(Dataset):
 
     def save_scores(self, scores,correct_id,path,dataset,method,weight,model_name,option):
         import json
+        # Create output directory if it doesn't exist
+        os.makedirs(path, exist_ok=True)
         path_=os.path.join(path, 'res.json')
         data = {"dataset":dataset, "model":model_name,"option":option,"method":method,"weight":weight, "Individual accuracy":scores,"correct_id":correct_id}
         with open(path_, 'a+') as file:
@@ -421,6 +429,8 @@ class COCO_QA(Dataset):
 
     def save_scores(self, scores,correct_id,path,dataset,method,weight,model_name,option):
         import json
+        # Create output directory if it doesn't exist
+        os.makedirs(path, exist_ok=True)
         path_=os.path.join(path, 'res.json')
         data = {"dataset":dataset, "model":model_name,"option":option,"method":method,"weight":weight, "Individual accuracy":scores,"correct_id":correct_id}
         with open(path_, 'a+') as file:
@@ -477,6 +487,9 @@ class COCO_QA(Dataset):
         path_=os.path.join(path, 'res.json')
         # data = {"dataset":dataset, "mode":mode,"Individual accuracy":metrics['Accuracy']*100}
         data = {"dataset":dataset, "method":method, "option":option,"Individual accuracy":metrics['Accuracy']*100,"correct_id":correct_id}
+
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path_), exist_ok=True)
 
         with open(path_, 'a+') as file:
             json.dump(data, file)
@@ -601,6 +614,10 @@ class VG_QA(Dataset):
         import json
         path_=os.path.join(path, 'res.json')
         data = {"dataset":dataset, "method":method, "option":option,"Individual accuracy":metrics['Accuracy']*100,"correct_id":correct_id}
+
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path_), exist_ok=True)
+
         with open(path_, 'a+') as file:
             json.dump(data, file)
             file.write('\n')

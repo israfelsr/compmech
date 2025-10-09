@@ -14,7 +14,7 @@ class QwenVLLMWrapper:
         root_dir,
         device,
         method="base",
-        model_name="/leonardo_work/EUHPC_D27_102/compmech/models/Qwen2.5-3B",
+        model_name="/leonardo_work/EUHPC_D27_102/compmech/models/Qwen2.5-VL-3B-Instruct",
     ):
         """
         Initialize Qwen2-VL model wrapper with vLLM.
